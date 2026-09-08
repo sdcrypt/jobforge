@@ -1,0 +1,37 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Environment — NEVER commit real .env
+backend/.env
+.env
+*.env
+
+# Database (SQLite dev DB)
+backend/*.db
+*.db
+
+# Documents (generated PDFs — private)
+backend/documents/
+documents/
+
+# Node / Frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
