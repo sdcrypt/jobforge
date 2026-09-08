@@ -1,0 +1,80 @@
+# ── JobForge — Docker Compose ───────────────────────────────────────────────
+#
+# Services:
+#   backend   FastAPI app (hot-reload)
+#   postgres  PostgreSQL 16 database
+#   redis     Redis 7 (for background tasks / Celery - Phase 2)
+#
+# Ollama runs on your HOST machine (not in Docker)
+# so it keeps Metal GPU acceleration on M1 Mac.
+# The backend reaches it via host.docker.internal:11434
+#
+# Usage:
+#   docker compose up --build          # first run
+#   docker compose up                  # subsequent runs
+#   docker compose down                # stop all
+#   docker compose down -v             # stop + delete DB data
+
+services:
+
+  # ── FastAPI Backend ──────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: jobforge_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      # Hot-reload: mount source so changes apply without rebuilding
+      - ./backend:/app
+      # Persist generated PDFs outside container
+      - ./documents:/app/documents
+    env_file:
+      - ./backend/.env
+    environment:
+      # Override DB + Redis to use Docker service names
+      DATABASE_URL: postgresql+asyncpg://jobforge:jobforge@postgres:5432/jobforge
+      REDIS_URL: redis://redis:6379/0
+      # Ollama on HOST — reached via special Docker DNS
+      LLM_BASE_URL: http://host.docker.internal:11434/v1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    # Needed on Linux so host.docker.internal resolves (Mac Docker Desktop handles it automatically)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # ── PostgreSQL ───────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: jobforge_postgres
+    environment:
+      POSTGRES_DB: jobforge
+      POSTGRES_USER: jobforge
+      POSTGRES_PASSWORD: jobforge
+    ports:
+      - "5432:5432"          # exposed so you can connect with a DB GUI
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ── Redis ────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: jobforge_redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+    name: jobforge_postgres_data

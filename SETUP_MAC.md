@@ -1,132 +1,116 @@
 # JobForge — Mac Setup Guide (M1)
 
-## Prerequisites
+## What runs where
 
-### 1. Install Homebrew (if not installed)
-```bash
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+Your Mac (host)
+├── Ollama          ← runs here to keep Metal GPU acceleration
+│   └── models: qwen2.5:7b, llama3.2:3b
+└── Docker Desktop
+    ├── jobforge_backend   (FastAPI on :8000)
+    ├── jobforge_postgres  (PostgreSQL on :5432)
+    └── jobforge_redis     (Redis on :6379)
 ```
 
-### 2. Install Python 3.11+
-```bash
-brew install python@3.11
-python3 --version   # should be 3.11+
-```
-
-### 3. Install Node.js 20+ (for frontend, Phase 6)
-```bash
-brew install node@20
-node --version
-```
+Nothing is installed on your system Python. Everything runs in containers.
 
 ---
 
-## Install Ollama (Local LLM — no API key needed)
+## Step 1 — Install Docker Desktop
 
-### 1. Download and install
+Download from: https://www.docker.com/products/docker-desktop/
+
+Choose **Apple Silicon** version. After install:
+- Open Docker Desktop
+- Wait for the whale icon in the menu bar to stop animating (engine started)
+
+---
+
+## Step 2 — Install Ollama (on host, for Metal GPU)
+
 ```bash
 brew install ollama
 ```
 
 Or download from: https://ollama.com/download/mac
 
-### 2. Start Ollama (runs in background)
+**Start Ollama** (runs as a background service):
 ```bash
 ollama serve
 ```
 
-### 3. Pull the models (one-time, ~8GB total)
-Open a new terminal tab and run:
+**Pull models** (one-time download, ~7GB total):
 ```bash
-# Smart model — Coordinator, DocGen, Rank agents (~4.7GB)
+# Open a new terminal tab while ollama serve is running
+
+# Smart model — Coordinator, DocGen, Rank (~4.7GB)
 ollama pull qwen2.5:7b
 
 # Fast model — Search agent, parallel calls (~2GB)
 ollama pull llama3.2:3b
 ```
 
-### 4. Verify Ollama is working
+Verify:
 ```bash
 ollama list
-# Should show both models
-
-curl http://localhost:11434/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{"model":"llama3.2:3b","messages":[{"role":"user","content":"Say OK"}]}'
+# NAME              ID            SIZE    MODIFIED
+# qwen2.5:7b        ...           4.7 GB  ...
+# llama3.2:3b       ...           2.0 GB  ...
 ```
 
 ---
 
-## Backend Setup
+## Step 3 — Clone & configure
 
-### 1. Clone the repo
 ```bash
 cd ~/Documents/Python
 git clone <your-github-repo-url> jobforge
-cd jobforge/backend
+cd jobforge
+
+# Create .env from template (pre-configured for Ollama + Docker)
+cp backend/.env.example backend/.env
 ```
 
-### 2. Create virtual environment
+No changes needed in `.env` — it's ready to go.
+
+---
+
+## Step 4 — Start everything with Docker Compose
+
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
+# From the jobforge/ root directory:
+docker compose up --build
 ```
 
-### 3. Install dependencies
-```bash
-pip install -r requirements.txt
-```
+First run takes ~3–5 minutes (downloads Python image, installs deps, pulls Playwright).
+Subsequent runs start in seconds.
 
-### 4. Install Playwright browsers (for Apply Agent)
-```bash
-playwright install chromium
+You'll see:
 ```
-
-### 5. Set up environment
-```bash
-cp .env.example .env
-# .env is pre-configured for Ollama — no changes needed to start
-```
-
-### 6. Run the backend
-```bash
-uvicorn main:app --reload --port 8000
-```
-
-You should see:
-```
-INFO: JobForge starting up
-INFO: DB tables created
-INFO: Uvicorn running on http://127.0.0.1:8000
+jobforge_postgres  | database system is ready to accept connections
+jobforge_backend   | INFO: JobForge starting up
+jobforge_backend   | INFO: DB tables created
+jobforge_backend   | INFO: Uvicorn running on http://0.0.0.0:8000
 ```
 
 ---
 
-## Verify Everything Works
+## Step 5 — Verify everything works
 
-### Check the API
 ```bash
-open http://localhost:8000/docs
-```
+# API is up
+curl http://localhost:8000/health
 
-### Check LLM connection
-```bash
+# Ollama connection (backend → host Ollama)
 curl http://localhost:8000/health/llm
-# Should return: {"status": "connected", "model": "llama3.2:3b", "response": "OK"}
+# Expected: {"status": "connected", "model": "llama3.2:3b", "response": "OK"}
 ```
 
-### Test WebSocket (in browser console)
-```javascript
-const ws = new WebSocket("ws://localhost:8000/ws");
-ws.onmessage = (e) => console.log(JSON.parse(e.data));
-ws.send("ping");  // Should receive "pong"
-```
+Open API docs: http://localhost:8000/docs
 
 ---
 
-## Quick First Run
-
-Once the server is running, try this in another terminal:
+## Step 6 — Quick first test
 
 ```bash
 # 1. Create your profile
@@ -135,32 +119,69 @@ curl -X POST http://localhost:8000/api/profile \
   -d '{
     "full_name": "Sourabh Dixit",
     "email": "sourabh.a.dixit@accenture.com",
-    "skills": [{"name": "Python", "level": "expert"}],
-    "target_roles": ["Backend Engineer"],
-    "remote_preference": "remote"
+    "skills": [
+      {"name": "Python", "level": "expert"},
+      {"name": "FastAPI", "level": "intermediate"}
+    ],
+    "target_roles": ["Backend Engineer", "Python Developer"],
+    "remote_preference": "remote",
+    "salary_min": 80000,
+    "salary_currency": "USD"
   }'
 
-# 2. Trigger a job search
+# 2. Search for jobs
 curl -X POST "http://localhost:8000/api/jobs/search?query=Python+Developer&location=remote"
 
-# 3. Check for jobs (wait ~30 seconds for search to complete)
-curl http://localhost:8000/api/jobs
+# 3. Check WebSocket for live agent events (in browser console):
+# const ws = new WebSocket("ws://localhost:8000/ws");
+# ws.onmessage = e => console.log(JSON.parse(e.data));
 
-# 4. Rank the jobs
-curl -X POST http://localhost:8000/api/jobs/rank
+# 4. List found jobs
+curl http://localhost:8000/api/jobs
 ```
 
 ---
 
-## Switching LLM Provider (Optional)
+## Common commands
 
-To switch from Ollama to OpenAI (when you have an API key), just edit `.env`:
+```bash
+# Start (foreground — see logs)
+docker compose up
+
+# Start (background)
+docker compose up -d
+
+# Stop
+docker compose down
+
+# Stop + delete database
+docker compose down -v
+
+# View backend logs
+docker compose logs -f backend
+
+# Rebuild after code changes to requirements.txt
+docker compose up --build
+
+# Open a shell inside the backend container
+docker compose exec backend bash
+```
+
+---
+
+## Switching LLM provider
+
+Edit `backend/.env` — no code changes, no rebuild needed:
 
 ```env
+# → OpenAI
 LLM_BASE_URL=https://api.openai.com/v1
 LLM_API_KEY=sk-your-key-here
 LLM_MODEL_SMART=gpt-4o
 LLM_MODEL_FAST=gpt-4o-mini
 ```
 
-No code changes needed.
+Then restart backend:
+```bash
+docker compose restart backend
+```
