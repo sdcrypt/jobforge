@@ -9,6 +9,7 @@ openai==1.57.0
 # Database — SQLite for dev, swap URL for PostgreSQL in prod
 sqlalchemy==2.0.36
 aiosqlite==0.20.0        # async SQLite driver
+asyncpg==0.30.0          # async PostgreSQL driver
 alembic==1.14.0          # migrations
 
 # Validation & Settings

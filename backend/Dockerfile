@@ -2,7 +2,7 @@
 # Works on M1 Mac (arm64) and x86_64
 # Ollama runs on the HOST (not in Docker) to keep Metal GPU acceleration
 
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
 WORKDIR /app
 
