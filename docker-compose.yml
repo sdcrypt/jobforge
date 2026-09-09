@@ -67,6 +67,46 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # ── Celery Worker (background + scheduled tasks) ─────────────────────────
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: jobforge_worker
+    command: celery -A workers.celery_app worker --loglevel=info
+    volumes:
+      - ./backend:/app
+      - ./documents:/app/documents
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://jobforge:jobforge@postgres:5432/jobforge
+      REDIS_URL: redis://redis:6379/0
+      LLM_BASE_URL: http://host.docker.internal:11434/v1
+    depends_on:
+      - postgres
+      - redis
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  # ── Celery Beat (scheduler — triggers search every 12h) ──────────────────
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: jobforge_beat
+    command: celery -A workers.celery_app beat --loglevel=info
+    volumes:
+      - ./backend:/app
+    env_file:
+      - ./backend/.env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+    restart: unless-stopped
+
   # ── Redis ────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine

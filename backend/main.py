@@ -12,6 +12,7 @@ from core.config import settings
 from core.database import init_db
 from core.websocket import ws_manager
 from api.routes import health, profile, jobs, applications
+from api.routes.search_config import router as search_config_router, pipeline_router
 
 log = structlog.get_logger()
 
@@ -47,6 +48,8 @@ app.include_router(health.router)
 app.include_router(profile.router)
 app.include_router(jobs.router)
 app.include_router(applications.router)
+app.include_router(search_config_router)
+app.include_router(pipeline_router)
 
 
 # ─── WebSocket — real-time agent activity feed ───────────────────────────────
