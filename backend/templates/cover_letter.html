@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Cover Letter — {{ profile.full_name }}</title>
+  <style>
+    @page {
+      size: A4;
+      margin: 20mm 22mm 20mm 22mm;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      font-size: 10.5pt;
+      color: #1a1a2e;
+      line-height: 1.6;
+      background: #fff;
+    }
+
+    /* ── Sender info ──────────────────────────────────────────── */
+    .sender {
+      margin-bottom: 24px;
+    }
+
+    .sender-name {
+      font-size: 14pt;
+      font-weight: 700;
+      color: #0f172a;
+      margin-bottom: 2px;
+    }
+
+    .sender-contact {
+      font-size: 9pt;
+      color: #64748b;
+      line-height: 1.5;
+    }
+
+    .sender-contact a { color: #2563eb; text-decoration: none; }
+
+    /* ── Date ────────────────────────────────────────────────── */
+    .date {
+      font-size: 9.5pt;
+      color: #64748b;
+      margin-bottom: 20px;
+    }
+
+    /* ── Company address ─────────────────────────────────────── */
+    .company-block {
+      margin-bottom: 20px;
+      font-size: 10pt;
+      color: #334155;
+      line-height: 1.5;
+    }
+
+    .company-name { font-weight: 600; }
+
+    /* ── Divider ─────────────────────────────────────────────── */
+    .divider {
+      border: none;
+      border-top: 1.5px solid #2563eb;
+      margin-bottom: 20px;
+      width: 40px;
+    }
+
+    /* ── Salutation ──────────────────────────────────────────── */
+    .salutation {
+      font-size: 10.5pt;
+      margin-bottom: 14px;
+      color: #1e293b;
+    }
+
+    /* ── Body ────────────────────────────────────────────────── */
+    .body p {
+      margin-bottom: 12px;
+      font-size: 10.5pt;
+      color: #334155;
+      text-align: justify;
+    }
+
+    /* ── Closing ─────────────────────────────────────────────── */
+    .closing {
+      margin-top: 24px;
+      font-size: 10.5pt;
+      color: #1e293b;
+      line-height: 2;
+    }
+
+    .signature {
+      font-weight: 700;
+      color: #0f172a;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ── Sender ────────────────────────────────────────────────── -->
+  <div class="sender">
+    <div class="sender-name">{{ profile.full_name }}</div>
+    <div class="sender-contact">
+      {{ profile.email }}
+      {% if profile.phone %} · {{ profile.phone }}{% endif %}
+      {% if profile.location %} · {{ profile.location }}{% endif %}
+      {% if profile.linkedin_url %}
+        <br><a href="{{ profile.linkedin_url }}">{{ profile.linkedin_url }}</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ── Date ──────────────────────────────────────────────────── -->
+  <div class="date">{{ date }}</div>
+
+  <!-- ── Company ───────────────────────────────────────────────── -->
+  <div class="company-block">
+    <div class="company-name">{{ job.company }}</div>
+    <div>Hiring Team</div>
+    {% if job.location %}<div>{{ job.location }}</div>{% endif %}
+  </div>
+
+  <hr class="divider">
+
+  <!-- ── Salutation ────────────────────────────────────────────── -->
+  <div class="salutation">Dear Hiring Team,</div>
+
+  <!-- ── Body ──────────────────────────────────────────────────── -->
+  <div class="body">
+    {% for paragraph in paragraphs %}
+    <p>{{ paragraph }}</p>
+    {% endfor %}
+  </div>
+
+  <!-- ── Closing ───────────────────────────────────────────────── -->
+  <div class="closing">
+    Sincerely,<br><br>
+    <span class="signature">{{ profile.full_name }}</span>
+  </div>
+
+</body>
+</html>
