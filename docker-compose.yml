@@ -1,9 +1,12 @@
 # ── JobForge — Docker Compose ───────────────────────────────────────────────
 #
 # Services:
-#   backend   FastAPI app (hot-reload)
+#   frontend  Next.js 15 web UI (port 3000)
+#   backend   FastAPI app (port 8000, hot-reload)
 #   postgres  PostgreSQL 16 database
-#   redis     Redis 7 (for background tasks / Celery - Phase 2)
+#   redis     Redis 7 (Celery broker)
+#   worker    Celery worker (background tasks)
+#   beat      Celery beat (scheduled search every 12h)
 #
 # Ollama runs on your HOST machine (not in Docker)
 # so it keeps Metal GPU acceleration on M1 Mac.
@@ -16,6 +19,23 @@
 #   docker compose down -v             # stop + delete DB data
 
 services:
+
+  # ── Next.js Frontend ─────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:8000
+        NEXT_PUBLIC_WS_URL: ws://localhost:8000
+    container_name: jobforge_frontend
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+    depends_on:
+      - backend
+    restart: unless-stopped
 
   # ── FastAPI Backend ──────────────────────────────────────────────────────
   backend:
