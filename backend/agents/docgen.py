@@ -40,7 +40,9 @@ RULES:
 - Reorder experience bullets to lead with what matters most for this role
 - Keep it to what fits on ONE A4 page
 - Match company tone: startup = concise & direct, enterprise = formal
-- NEVER invent experience — only use what the profile contains
+- NEVER invent experience, education, employers, dates, degrees, certifications,
+  metrics, or personal details — only use what the profile contains
+- If the profile has no education, return "education": []
 
 Return ONLY valid JSON (no markdown, no explanation):
 {
@@ -58,9 +60,7 @@ Return ONLY valid JSON (no markdown, no explanation):
       ]
     }
   ],
-  "education": [
-    {"degree": "B.Sc. Computer Science", "institution": "University Name", "year": 2020}
-  ],
+  "education": [{"degree": "BTech", "institution": "Lovely Professional University", "year": 2012}],
   "why_this_role": "One sentence on why this candidate is a strong fit"
 }"""
 
@@ -117,6 +117,7 @@ class DocGenAgent(BaseAgent):
         # ── Step 1: Generate one-pager content ─────────────────────────────
         await self.emit("thinking", "Tailoring your resume to the job description...")
         one_pager_data = await self._generate_one_pager_data(job_ctx, profile_ctx)
+        one_pager_data["education"] = self._education_from_profile(profile)
 
         # ── Step 2: Generate cover letter ──────────────────────────────────
         await self.emit("thinking", "Writing your cover letter...")
@@ -280,6 +281,29 @@ class DocGenAgent(BaseAgent):
             f"Salary: {job.salary_range or 'Not specified'}\n"
             f"Description:\n{(job.description or '')[:1500]}"
         )
+
+    @staticmethod
+    def _education_from_profile(profile: UserProfile) -> list[dict]:
+        education = []
+        for entry in profile.education or []:
+            if not isinstance(entry, dict):
+                continue
+
+            degree = entry.get("degree") or ""
+            institution = entry.get("institution") or ""
+            year = entry.get("year") or ""
+            if not any([degree, institution, year]):
+                continue
+
+            education.append(
+                {
+                    "degree": degree,
+                    "institution": institution,
+                    "year": year,
+                }
+            )
+
+        return education
 
     # ── Fallback HTML (if templates missing) ─────────────────────────────
 
