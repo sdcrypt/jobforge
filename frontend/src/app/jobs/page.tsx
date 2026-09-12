@@ -17,7 +17,7 @@ export default function JobsPage() {
 
   const filtered = jobs
     .filter((j) => activeTab === 'all' || j.status === activeTab)
-    .filter((j) => j.fit_score == null || j.fit_score >= minScore / 100)
+    .filter((j) => j.fit_score == null || j.fit_score >= minScore)
     .sort((a, b) => (b.fit_score ?? 0) - (a.fit_score ?? 0))
 
   async function runPipeline() {

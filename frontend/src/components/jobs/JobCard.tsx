@@ -9,9 +9,15 @@ interface Props {
   onRefresh?: () => void
 }
 
+function scorePercent(value: number | null) {
+  if (value == null) return null
+  return Math.round(Math.max(0, Math.min(100, value)))
+}
+
 function ScoreBar({ label, value }: { label: string; value: number | null }) {
-  const pct = value != null ? Math.round(value * 100) : 0
+  const pct = scorePercent(value)
   const color =
+    pct == null ? 'bg-slate-200' :
     pct >= 70 ? 'bg-green-500' :
     pct >= 45 ? 'bg-yellow-500' :
     'bg-red-400'
@@ -20,10 +26,10 @@ function ScoreBar({ label, value }: { label: string; value: number | null }) {
     <div>
       <div className="flex justify-between text-xs text-slate-500 mb-0.5">
         <span>{label}</span>
-        <span>{value != null ? `${pct}%` : '—'}</span>
+        <span>{pct != null ? `${pct}%` : '—'}</span>
       </div>
       <div className="score-bar">
-        <div className={clsx('score-fill', color)} style={{ width: `${pct}%` }} />
+        <div className={clsx('score-fill', color)} style={{ width: `${pct ?? 0}%` }} />
       </div>
     </div>
   )
@@ -33,7 +39,7 @@ export default function JobCard({ job, onRefresh }: Props) {
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  const fitPct = job.fit_score != null ? Math.round(job.fit_score * 100) : null
+  const fitPct = scorePercent(job.fit_score)
 
   const fitColor =
     fitPct == null ? 'text-slate-400' :
