@@ -4,261 +4,465 @@
   <meta charset="utf-8">
   <title>{{ profile.full_name }} — Resume</title>
   <style>
-    /* ── Page setup ──────────────────────────────────────────── */
+    /* ── Page ──────────────────────────────────────────────────────────── */
     @page {
       size: A4;
-      margin: 12mm 14mm 12mm 14mm;
+      margin: 0;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
       font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
-      font-size: 9.5pt;
-      color: #1a1a2e;
-      line-height: 1.45;
+      font-size: 9pt;
+      color: #1e293b;
       background: #fff;
+      line-height: 1.45;
     }
 
-    /* ── Header ─────────────────────────────────────────────── */
+    a { color: inherit; text-decoration: none; }
+
+    /* ── Header band ────────────────────────────────────────────────────── */
     .header {
-      border-bottom: 2.5px solid #2563eb;
-      padding-bottom: 8px;
-      margin-bottom: 10px;
+      background: #0f2044;
+      padding: 22px 26px 18px;
+      color: #fff;
     }
 
-    .header h1 {
-      font-size: 20pt;
-      font-weight: 700;
-      letter-spacing: -0.3px;
-      color: #0f172a;
+    .header-top {
+      display: table;
+      width: 100%;
+    }
+
+    .header-name-block {
+      display: table-cell;
+      vertical-align: middle;
+    }
+
+    .name {
+      font-size: 22pt;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      color: #fff;
+      line-height: 1.1;
     }
 
     .headline {
-      font-size: 9pt;
-      color: #2563eb;
-      font-weight: 500;
-      margin-top: 2px;
-      margin-bottom: 5px;
+      font-size: 9.5pt;
+      color: #93c5fd;
+      font-weight: 400;
+      margin-top: 4px;
     }
 
-    .contact-row {
-      font-size: 8pt;
-      color: #475569;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
+    .fit-badge-cell {
+      display: table-cell;
+      vertical-align: middle;
+      text-align: right;
+      width: 80px;
     }
 
-    .contact-row span::before {
-      content: "·";
-      margin-right: 6px;
-      color: #cbd5e1;
+    .fit-badge {
+      display: inline-block;
+      background: #2563eb;
+      color: #fff;
+      font-size: 16pt;
+      font-weight: 800;
+      padding: 6px 12px;
+      border-radius: 8px;
+      line-height: 1;
     }
 
-    .contact-row span:first-child::before { content: ""; margin-right: 0; }
-
-    a { color: #2563eb; text-decoration: none; }
-
-    /* ── Sections ────────────────────────────────────────────── */
-    .section { margin-bottom: 9px; }
-
-    .section-title {
-      font-size: 7.5pt;
-      font-weight: 700;
+    .fit-label {
+      font-size: 6.5pt;
+      color: #93c5fd;
+      text-align: center;
+      margin-top: 3px;
+      letter-spacing: 0.8px;
       text-transform: uppercase;
-      letter-spacing: 1.2px;
-      color: #2563eb;
-      border-bottom: 1px solid #e2e8f0;
-      padding-bottom: 2px;
-      margin-bottom: 5px;
     }
 
-    /* ── Summary ─────────────────────────────────────────────── */
-    .summary p {
-      font-size: 9pt;
-      color: #334155;
-      line-height: 1.5;
+    /* Contact strip */
+    .contact-strip {
+      margin-top: 10px;
+      display: table;
+      width: 100%;
     }
 
-    /* ── Skills ──────────────────────────────────────────────── */
-    .skills-grid {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 4px;
+    .contact-item {
+      display: table-cell;
+      font-size: 7.5pt;
+      color: #cbd5e1;
+      padding-right: 18px;
+      vertical-align: middle;
     }
 
-    .skill-tag {
-      background: #eff6ff;
-      color: #1d4ed8;
-      border: 1px solid #bfdbfe;
-      border-radius: 3px;
-      padding: 1px 6px;
+    .contact-item span.icon {
+      color: #60a5fa;
+      margin-right: 3px;
+    }
+
+    /* ── Two-column body ────────────────────────────────────────────────── */
+    .body-wrap {
+      display: table;
+      width: 100%;
+      /* min-height fills A4 below the header */
+    }
+
+    /* ── LEFT SIDEBAR ───────────────────────────────────────────────────── */
+    .sidebar {
+      display: table-cell;
+      width: 33%;
+      background: #f1f5f9;
+      padding: 16px 14px 16px 16px;
+      vertical-align: top;
+      border-right: 1px solid #e2e8f0;
+    }
+
+    /* ── RIGHT MAIN ─────────────────────────────────────────────────────── */
+    .main {
+      display: table-cell;
+      width: 67%;
+      background: #fff;
+      padding: 16px 18px 16px 16px;
+      vertical-align: top;
+    }
+
+    /* ── Section headings (shared) ──────────────────────────────────────── */
+    .sec-title {
+      font-size: 6.5pt;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1.6px;
+      color: #1e40af;
+      border-bottom: 1.5px solid #bfdbfe;
+      padding-bottom: 3px;
+      margin-bottom: 8px;
+      margin-top: 14px;
+    }
+
+    .sec-title:first-child {
+      margin-top: 0;
+    }
+
+    /* ── SIDEBAR: Skills ────────────────────────────────────────────────── */
+    .skill-row {
+      margin-bottom: 6px;
+    }
+
+    .skill-name {
       font-size: 8pt;
-      font-weight: 500;
-    }
-
-    /* ── Experience ──────────────────────────────────────────── */
-    .role { margin-bottom: 7px; }
-
-    .role-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
+      font-weight: 600;
+      color: #0f172a;
       margin-bottom: 2px;
     }
 
-    .role-title {
+    .skill-dots {
+      font-size: 8pt;
+      letter-spacing: 2px;
+    }
+
+    .dot-filled { color: #2563eb; }
+    .dot-empty  { color: #cbd5e1; }
+
+    /* ── SIDEBAR: Education ─────────────────────────────────────────────── */
+    .edu-entry {
+      margin-bottom: 7px;
+    }
+
+    .edu-degree {
+      font-size: 8pt;
       font-weight: 700;
+      color: #0f172a;
+      line-height: 1.3;
+    }
+
+    .edu-inst {
+      font-size: 7.5pt;
+      color: #475569;
+      margin-top: 1px;
+    }
+
+    .edu-year {
+      font-size: 7pt;
+      color: #94a3b8;
+    }
+
+    /* ── SIDEBAR: Contact ───────────────────────────────────────────────── */
+    .contact-row-side {
+      font-size: 7.5pt;
+      color: #334155;
+      margin-bottom: 4px;
+      word-break: break-all;
+    }
+
+    .contact-row-side .lbl {
+      color: #94a3b8;
+      font-size: 6.5pt;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      display: block;
+      margin-bottom: 1px;
+    }
+
+    /* ── MAIN: Summary ──────────────────────────────────────────────────── */
+    .summary-text {
+      font-size: 9pt;
+      color: #334155;
+      line-height: 1.55;
+    }
+
+    /* ── MAIN: Experience ───────────────────────────────────────────────── */
+    .exp-item {
+      margin-bottom: 11px;
+    }
+
+    .exp-header {
+      display: table;
+      width: 100%;
+      margin-bottom: 1px;
+    }
+
+    .exp-left {
+      display: table-cell;
+      vertical-align: baseline;
+    }
+
+    .exp-right {
+      display: table-cell;
+      vertical-align: baseline;
+      text-align: right;
+      white-space: nowrap;
+      width: 90px;
+    }
+
+    .exp-role {
       font-size: 9.5pt;
+      font-weight: 700;
       color: #0f172a;
     }
 
-    .role-company {
-      font-size: 9pt;
-      color: #475569;
-      margin-left: 5px;
+    .exp-company {
+      font-size: 8.5pt;
+      color: #2563eb;
+      font-weight: 500;
     }
 
-    .role-period {
-      font-size: 8pt;
+    .exp-period {
+      font-size: 7.5pt;
       color: #94a3b8;
-      white-space: nowrap;
     }
 
-    .role ul {
+    .exp-bullets {
       list-style: none;
-      padding-left: 0;
-      margin-top: 2px;
+      padding: 0;
+      margin-top: 3px;
     }
 
-    .role ul li {
-      font-size: 8.8pt;
-      color: #334155;
-      padding-left: 12px;
+    .exp-bullets li {
+      font-size: 8.3pt;
+      color: #374151;
+      padding-left: 11px;
       position: relative;
-      margin-bottom: 1.5px;
+      margin-bottom: 2px;
       line-height: 1.4;
     }
 
-    .role ul li::before {
+    .exp-bullets li::before {
       content: "▸";
       position: absolute;
       left: 0;
-      color: #2563eb;
+      color: #3b82f6;
       font-size: 7pt;
       top: 1px;
     }
 
-    /* ── Education ───────────────────────────────────────────── */
-    .edu-row {
-      display: flex;
-      justify-content: space-between;
-      font-size: 8.8pt;
-      margin-bottom: 2px;
-    }
-
-    .edu-degree { font-weight: 600; color: #0f172a; }
-    .edu-institution { color: #475569; margin-left: 5px; }
-    .edu-year { color: #94a3b8; font-size: 8pt; }
-
-    /* ── Why this role (subtle footer note) ─────────────────── */
+    /* ── MAIN: Why this role ────────────────────────────────────────────── */
     .why-note {
-      margin-top: 8px;
-      padding: 5px 8px;
-      background: #f0f9ff;
+      margin-top: 12px;
+      padding: 6px 10px;
+      background: #eff6ff;
       border-left: 3px solid #2563eb;
-      font-size: 8pt;
+      border-radius: 0 4px 4px 0;
+      font-size: 7.8pt;
       color: #1e40af;
       font-style: italic;
+      line-height: 1.45;
     }
+
+    /* ── Divider between experience items ───────────────────────────────── */
+    .exp-divider {
+      border: none;
+      border-top: 1px dashed #e2e8f0;
+      margin: 8px 0;
+    }
+
   </style>
 </head>
 <body>
 
-  <!-- ── Header ──────────────────────────────────────────────── -->
+  <!-- ═══════════════════════════════════════════════════════════════
+       HEADER
+       ═══════════════════════════════════════════════════════════════ -->
   <div class="header">
-    <h1>{{ profile.full_name }}</h1>
-    <div class="headline">{{ data.headline }}</div>
-    <div class="contact-row">
-      <span>{{ profile.email }}</span>
-      {% if profile.phone %}<span>{{ profile.phone }}</span>{% endif %}
-      {% if profile.location %}<span>{{ profile.location }}</span>{% endif %}
+    <div class="header-top">
+
+      <div class="header-name-block">
+        <div class="name">{{ profile.full_name }}</div>
+        <div class="headline">{{ data.headline }}</div>
+      </div>
+
+      {% if job and job.fit_score is not none %}
+      <div class="fit-badge-cell">
+        <div class="fit-badge">{{ (job.fit_score * 100) | int }}%</div>
+        <div class="fit-label">Fit Score</div>
+      </div>
+      {% endif %}
+
+    </div>
+
+    <!-- Contact strip -->
+    <div class="contact-strip">
+      <div class="contact-item"><span class="icon">✉</span>{{ profile.email }}</div>
+      {% if profile.phone %}
+      <div class="contact-item"><span class="icon">✆</span>{{ profile.phone }}</div>
+      {% endif %}
+      {% if profile.location %}
+      <div class="contact-item"><span class="icon">⌖</span>{{ profile.location }}</div>
+      {% endif %}
       {% if profile.linkedin_url %}
-        <span><a href="{{ profile.linkedin_url }}">LinkedIn</a></span>
+      <div class="contact-item"><span class="icon">in</span>{{ profile.linkedin_url | replace('https://linkedin.com/in/', 'linkedin/') | replace('https://www.linkedin.com/in/', 'linkedin/') }}</div>
       {% endif %}
       {% if profile.github_url %}
-        <span><a href="{{ profile.github_url }}">GitHub</a></span>
+      <div class="contact-item"><span class="icon">⌥</span>{{ profile.github_url | replace('https://github.com/', 'github/') }}</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       TWO-COLUMN BODY
+       ═══════════════════════════════════════════════════════════════ -->
+  <div class="body-wrap">
+
+    <!-- ─── LEFT SIDEBAR ─────────────────────────────────────────── -->
+    <div class="sidebar">
+
+      <!-- Skills -->
+      {% if data.highlighted_skills %}
+      <div class="sec-title">Skills</div>
+      {% set skill_levels = {} %}
+      {% if profile.skills %}
+        {% for sk in profile.skills %}
+          {% set _ = skill_levels.update({sk.name | lower: sk.level}) %}
+        {% endfor %}
+      {% endif %}
+      {% for skill_name in data.highlighted_skills %}
+        {% set level = skill_levels.get(skill_name | lower, 'intermediate') %}
+        <div class="skill-row">
+          <div class="skill-name">{{ skill_name }}</div>
+          <div class="skill-dots">
+            {% if level == 'expert' %}
+              <span class="dot-filled">●●●●●</span>
+            {% elif level == 'intermediate' %}
+              <span class="dot-filled">●●●</span><span class="dot-empty">●●</span>
+            {% else %}
+              <span class="dot-filled">●●</span><span class="dot-empty">●●●</span>
+            {% endif %}
+          </div>
+        </div>
+      {% endfor %}
+      {% endif %}
+
+      <!-- Education -->
+      {% if data.education %}
+      <div class="sec-title">Education</div>
+      {% for edu in data.education %}
+      <div class="edu-entry">
+        <div class="edu-degree">{{ edu.degree }}</div>
+        <div class="edu-inst">{{ edu.institution }}</div>
+        <div class="edu-year">{{ edu.year }}</div>
+      </div>
+      {% endfor %}
+      {% endif %}
+
+      <!-- Languages / other profile extras -->
+      {% if profile.preferred_locations %}
+      <div class="sec-title">Preferred Locations</div>
+      {% for loc in profile.preferred_locations %}
+      <div class="contact-row-side">{{ loc }}</div>
+      {% endfor %}
+      {% endif %}
+
+      <!-- Contact (repeat for print convenience) -->
+      <div class="sec-title">Contact</div>
+      <div class="contact-row-side">
+        <span class="lbl">Email</span>{{ profile.email }}
+      </div>
+      {% if profile.phone %}
+      <div class="contact-row-side">
+        <span class="lbl">Phone</span>{{ profile.phone }}
+      </div>
+      {% endif %}
+      {% if profile.linkedin_url %}
+      <div class="contact-row-side">
+        <span class="lbl">LinkedIn</span>{{ profile.linkedin_url }}
+      </div>
+      {% endif %}
+      {% if profile.github_url %}
+      <div class="contact-row-side">
+        <span class="lbl">GitHub</span>{{ profile.github_url }}
+      </div>
       {% endif %}
       {% if profile.portfolio_url %}
-        <span><a href="{{ profile.portfolio_url }}">Portfolio</a></span>
+      <div class="contact-row-side">
+        <span class="lbl">Portfolio</span>{{ profile.portfolio_url }}
+      </div>
       {% endif %}
-    </div>
-  </div>
 
-  <!-- ── Summary ──────────────────────────────────────────────── -->
-  {% if data.summary %}
-  <div class="section">
-    <div class="section-title">Summary</div>
-    <div class="summary"><p>{{ data.summary }}</p></div>
-  </div>
-  {% endif %}
+    </div><!-- /sidebar -->
 
-  <!-- ── Skills ───────────────────────────────────────────────── -->
-  {% if data.highlighted_skills %}
-  <div class="section">
-    <div class="section-title">Skills</div>
-    <div class="skills-grid">
-      {% for skill in data.highlighted_skills %}
-        <span class="skill-tag">{{ skill }}</span>
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
+    <!-- ─── RIGHT MAIN ────────────────────────────────────────────── -->
+    <div class="main">
 
-  <!-- ── Experience ────────────────────────────────────────────── -->
-  {% if data.experience %}
-  <div class="section">
-    <div class="section-title">Experience</div>
-    {% for exp in data.experience %}
-    <div class="role">
-      <div class="role-header">
-        <div>
-          <span class="role-title">{{ exp.role }}</span>
-          <span class="role-company">{{ exp.company }}</span>
+      <!-- Professional Summary -->
+      {% if data.summary %}
+      <div class="sec-title">Professional Summary</div>
+      <p class="summary-text">{{ data.summary }}</p>
+      {% endif %}
+
+      <!-- Experience -->
+      {% if data.experience %}
+      <div class="sec-title">Experience</div>
+      {% for exp in data.experience %}
+        {% if not loop.first %}<hr class="exp-divider">{% endif %}
+        <div class="exp-item">
+          <div class="exp-header">
+            <div class="exp-left">
+              <div class="exp-role">{{ exp.role }}</div>
+              <div class="exp-company">{{ exp.company }}</div>
+            </div>
+            <div class="exp-right">
+              <div class="exp-period">{{ exp.period }}</div>
+            </div>
+          </div>
+          <ul class="exp-bullets">
+            {% for bullet in exp.bullets %}
+            <li>{{ bullet }}</li>
+            {% endfor %}
+          </ul>
         </div>
-        <span class="role-period">{{ exp.period }}</span>
-      </div>
-      <ul>
-        {% for bullet in exp.bullets %}
-        <li>{{ bullet }}</li>
-        {% endfor %}
-      </ul>
-    </div>
-    {% endfor %}
-  </div>
-  {% endif %}
+      {% endfor %}
+      {% endif %}
 
-  <!-- ── Education ─────────────────────────────────────────────── -->
-  {% if data.education %}
-  <div class="section">
-    <div class="section-title">Education</div>
-    {% for edu in data.education %}
-    <div class="edu-row">
-      <div>
-        <span class="edu-degree">{{ edu.degree }}</span>
-        <span class="edu-institution">· {{ edu.institution }}</span>
+      <!-- Why this role (tailoring note) -->
+      {% if data.why_this_role %}
+      <div class="why-note">
+        <strong>Why this role:</strong> {{ data.why_this_role }}
       </div>
-      <span class="edu-year">{{ edu.year }}</span>
-    </div>
-    {% endfor %}
-  </div>
-  {% endif %}
+      {% endif %}
 
-  <!-- ── Why this role (optional tailoring note) ───────────────── -->
-  {% if data.why_this_role %}
-  <div class="why-note">{{ data.why_this_role }}</div>
-  {% endif %}
+    </div><!-- /main -->
+
+  </div><!-- /body-wrap -->
 
 </body>
 </html>

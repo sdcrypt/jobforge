@@ -4,9 +4,10 @@
   <meta charset="utf-8">
   <title>Cover Letter — {{ profile.full_name }}</title>
   <style>
+    /* ── Page ──────────────────────────────────────────────────────── */
     @page {
       size: A4;
-      margin: 20mm 22mm 20mm 22mm;
+      margin: 0;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -14,126 +15,180 @@
     body {
       font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
       font-size: 10.5pt;
-      color: #1a1a2e;
-      line-height: 1.6;
+      color: #1e293b;
+      line-height: 1.65;
       background: #fff;
     }
 
-    /* ── Sender info ──────────────────────────────────────────── */
-    .sender {
-      margin-bottom: 24px;
+    a { color: #2563eb; text-decoration: none; }
+
+    /* ── Header band (same navy as one-pager for cohesion) ──────── */
+    .header {
+      background: #0f2044;
+      padding: 22px 28px 18px;
+      color: #fff;
     }
 
     .sender-name {
-      font-size: 14pt;
-      font-weight: 700;
-      color: #0f172a;
-      margin-bottom: 2px;
+      font-size: 18pt;
+      font-weight: 800;
+      letter-spacing: -0.3px;
+      color: #fff;
     }
 
-    .sender-contact {
+    .sender-title {
       font-size: 9pt;
-      color: #64748b;
-      line-height: 1.5;
+      color: #93c5fd;
+      margin-top: 3px;
     }
 
-    .sender-contact a { color: #2563eb; text-decoration: none; }
+    .sender-contacts {
+      margin-top: 10px;
+      font-size: 8pt;
+      color: #cbd5e1;
+      display: table;
+      width: 100%;
+    }
 
-    /* ── Date ────────────────────────────────────────────────── */
-    .date {
+    .sender-contacts span {
+      display: table-cell;
+      padding-right: 20px;
+    }
+
+    .sender-contacts span em {
+      color: #60a5fa;
+      font-style: normal;
+      margin-right: 3px;
+    }
+
+    /* ── Letter body area ───────────────────────────────────────── */
+    .letter-body {
+      padding: 26px 30px 30px;
+    }
+
+    /* Date */
+    .letter-date {
       font-size: 9.5pt;
       color: #64748b;
       margin-bottom: 20px;
     }
 
-    /* ── Company address ─────────────────────────────────────── */
-    .company-block {
-      margin-bottom: 20px;
+    /* Addressee block */
+    .addressee {
+      margin-bottom: 6px;
       font-size: 10pt;
       color: #334155;
-      line-height: 1.5;
+      line-height: 1.55;
     }
 
-    .company-name { font-weight: 600; }
-
-    /* ── Divider ─────────────────────────────────────────────── */
-    .divider {
-      border: none;
-      border-top: 1.5px solid #2563eb;
-      margin-bottom: 20px;
-      width: 40px;
-    }
-
-    /* ── Salutation ──────────────────────────────────────────── */
-    .salutation {
-      font-size: 10.5pt;
-      margin-bottom: 14px;
-      color: #1e293b;
-    }
-
-    /* ── Body ────────────────────────────────────────────────── */
-    .body p {
-      margin-bottom: 12px;
-      font-size: 10.5pt;
-      color: #334155;
-      text-align: justify;
-    }
-
-    /* ── Closing ─────────────────────────────────────────────── */
-    .closing {
-      margin-top: 24px;
-      font-size: 10.5pt;
-      color: #1e293b;
-      line-height: 2;
-    }
-
-    .signature {
+    .addressee strong {
       font-weight: 700;
       color: #0f172a;
+      font-size: 11pt;
+    }
+
+    /* Blue accent rule */
+    .accent-rule {
+      margin: 18px 0;
+      border: none;
+      border-top: 2.5px solid #2563eb;
+      width: 42px;
+    }
+
+    /* Salutation */
+    .salutation {
+      font-size: 10.5pt;
+      color: #1e293b;
+      margin-bottom: 16px;
+      font-weight: 500;
+    }
+
+    /* Paragraphs */
+    .body-para {
+      font-size: 10.5pt;
+      color: #334155;
+      line-height: 1.7;
+      text-align: justify;
+      margin-bottom: 14px;
+    }
+
+    /* Closing */
+    .closing {
+      margin-top: 26px;
+      font-size: 10.5pt;
+      color: #1e293b;
+      line-height: 1.8;
+    }
+
+    .sig-name {
+      font-size: 12pt;
+      font-weight: 800;
+      color: #0f172a;
+      margin-top: 6px;
+    }
+
+    /* Subtle job reference footer */
+    .ref-footer {
+      margin-top: 24px;
+      padding-top: 10px;
+      border-top: 1px solid #e2e8f0;
+      font-size: 7.5pt;
+      color: #94a3b8;
     }
   </style>
 </head>
 <body>
 
-  <!-- ── Sender ────────────────────────────────────────────────── -->
-  <div class="sender">
+  <!-- ══════════════════════════════════════════════════════
+       HEADER — sender identity (matches one-pager style)
+       ══════════════════════════════════════════════════════ -->
+  <div class="header">
     <div class="sender-name">{{ profile.full_name }}</div>
-    <div class="sender-contact">
-      {{ profile.email }}
-      {% if profile.phone %} · {{ profile.phone }}{% endif %}
-      {% if profile.location %} · {{ profile.location }}{% endif %}
+    {% if profile.headline %}
+    <div class="sender-title">{{ profile.headline }}</div>
+    {% endif %}
+
+    <div class="sender-contacts">
+      <span><em>✉</em>{{ profile.email }}</span>
+      {% if profile.phone %}<span><em>✆</em>{{ profile.phone }}</span>{% endif %}
+      {% if profile.location %}<span><em>⌖</em>{{ profile.location }}</span>{% endif %}
       {% if profile.linkedin_url %}
-        <br><a href="{{ profile.linkedin_url }}">{{ profile.linkedin_url }}</a>
+      <span><em>in</em>{{ profile.linkedin_url | replace('https://linkedin.com/in/', '') | replace('https://www.linkedin.com/in/', '') }}</span>
       {% endif %}
     </div>
   </div>
 
-  <!-- ── Date ──────────────────────────────────────────────────── -->
-  <div class="date">{{ date }}</div>
+  <!-- ══════════════════════════════════════════════════════
+       LETTER BODY
+       ══════════════════════════════════════════════════════ -->
+  <div class="letter-body">
 
-  <!-- ── Company ───────────────────────────────────────────────── -->
-  <div class="company-block">
-    <div class="company-name">{{ job.company }}</div>
-    <div>Hiring Team</div>
-    {% if job.location %}<div>{{ job.location }}</div>{% endif %}
-  </div>
+    <div class="letter-date">{{ date }}</div>
 
-  <hr class="divider">
+    <div class="addressee">
+      <strong>{{ job.company }}</strong><br>
+      Hiring Team
+      {% if job.location %}<br>{{ job.location }}{% endif %}
+    </div>
 
-  <!-- ── Salutation ────────────────────────────────────────────── -->
-  <div class="salutation">Dear Hiring Team,</div>
+    <hr class="accent-rule">
 
-  <!-- ── Body ──────────────────────────────────────────────────── -->
-  <div class="body">
+    <div class="salutation">Dear Hiring Team,</div>
+
     {% for paragraph in paragraphs %}
-    <p>{{ paragraph }}</p>
+    <p class="body-para">{{ paragraph }}</p>
     {% endfor %}
-  </div>
 
-  <!-- ── Closing ───────────────────────────────────────────────── -->
-  <div class="closing">
-    Sincerely,<br><br>
-    <span class="signature">{{ profile.full_name }}</span>
+    <div class="closing">
+      Sincerely,
+      <div class="sig-name">{{ profile.full_name }}</div>
+    </div>
+
+    <div class="ref-footer">
+      Re: {{ job.title }} — {{ job.company }}
+      {% if job.url %} · <a href="{{ job.url }}">{{ job.url }}</a>{% endif %}
+    </div>
+
   </div>
 
 </body>

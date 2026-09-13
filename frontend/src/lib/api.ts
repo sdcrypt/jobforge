@@ -106,6 +106,21 @@ export const api = {
         method: 'POST',
         body: JSON.stringify(data),
       }),
+    /** Upload a PDF or DOCX resume — returns parsed fields for review, does NOT auto-save. */
+    parseResume: async (file: File): Promise<{ parsed: Partial<UserProfile>; message: string }> => {
+      const form = new FormData()
+      form.append('file', file)
+      const res = await fetch(`${BASE}/api/profile/parse-resume`, {
+        method: 'POST',
+        body: form,
+        // No Content-Type — let browser set multipart/form-data + boundary
+      })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }))
+        throw new Error(err.detail || `HTTP ${res.status}`)
+      }
+      return res.json()
+    },
   },
 
   // ── Search Config ───────────────────────────────────────────────────────
