@@ -66,11 +66,34 @@ async def run_pipeline(db: AsyncSession) -> dict:
     )
 
     # ── Step 2: Store (deduplicate) ───────────────────────────────────────
+    # Primary dedup: exact URL match (DB unique constraint)
+    # Secondary dedup: same company + same title (catches URL variants / LinkedIn
+    #   returning the same job for different keyword/location combos)
+    from sqlalchemy import and_, func
     new_count = 0
     for j in raw_jobs:
-        existing = await db.execute(select(Job).where(Job.url == j["url"]))
-        if existing.scalar_one_or_none():
+        url = j.get("url", "")
+        if not url:
             continue
+
+        # Primary: URL
+        existing_url = await db.execute(select(Job).where(Job.url == url))
+        if existing_url.scalar_one_or_none():
+            continue
+
+        # Secondary: same company + title (case-insensitive)
+        company = (j.get("company") or "").strip()
+        title = (j.get("title") or "").strip()
+        if company and title:
+            existing_pair = await db.execute(
+                select(Job).where(
+                    func.lower(Job.company) == company.lower(),
+                    func.lower(Job.title) == title.lower(),
+                )
+            )
+            if existing_pair.scalar_one_or_none():
+                continue
+
         db.add(Job(**{k: v for k, v in j.items() if hasattr(Job, k)}))
         new_count += 1
 

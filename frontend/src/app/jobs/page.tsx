@@ -14,6 +14,7 @@ export default function JobsPage() {
   const [minScore, setMinScore] = useState(0)
   const [runningPipeline, setRunningPipeline] = useState(false)
   const [pipelineMsg, setPipelineMsg] = useState<string | null>(null)
+  const [clearing, setClearing] = useState(false)
 
   const filtered = jobs
     .filter((j) => activeTab === 'all' || j.status === activeTab)
@@ -37,6 +38,20 @@ export default function JobsPage() {
     }
   }
 
+  async function clearJobs() {
+    if (!confirm('Delete ALL jobs from the database? This cannot be undone.')) return
+    setClearing(true)
+    try {
+      const res = await api.jobs.clear()
+      setPipelineMsg(`Cleared ${res.deleted} jobs — run the pipeline to fetch fresh results.`)
+      refresh()
+    } catch (e: unknown) {
+      setPipelineMsg(e instanceof Error ? e.message : 'Clear failed')
+    } finally {
+      setClearing(false)
+    }
+  }
+
   return (
     <div className="max-w-5xl mx-auto">
       {/* Header */}
@@ -47,19 +62,27 @@ export default function JobsPage() {
             {jobs.length} job{jobs.length !== 1 ? 's' : ''} found · auto-refreshes every 10 s
           </p>
         </div>
-        <button
-          onClick={runPipeline}
-          disabled={runningPipeline}
-          className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-60 transition-colors flex items-center gap-2"
-        >
-          {runningPipeline ? (
-            <>
-              <span className="animate-spin">⚙️</span> Running…
-            </>
-          ) : (
-            '🚀 Run Pipeline'
-          )}
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={clearJobs}
+            disabled={clearing || jobs.length === 0}
+            title="Clear all jobs from DB"
+            className="px-3 py-2 border border-slate-200 text-slate-500 rounded-lg text-sm hover:border-red-300 hover:text-red-500 disabled:opacity-40 transition-colors"
+          >
+            {clearing ? '…' : '🗑 Clear'}
+          </button>
+          <button
+            onClick={runPipeline}
+            disabled={runningPipeline}
+            className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-60 transition-colors flex items-center gap-2"
+          >
+            {runningPipeline ? (
+              <><span className="animate-spin">⚙️</span> Running…</>
+            ) : (
+              '🚀 Run Pipeline'
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Pipeline message */}

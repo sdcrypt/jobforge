@@ -37,6 +37,7 @@ function ScoreBar({ label, value }: { label: string; value: number | null }) {
 
 export default function JobCard({ job, onRefresh }: Props) {
   const [generating, setGenerating] = useState(false)
+  const [dismissing, setDismissing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const fitPct = scorePercent(job.fit_score)
@@ -57,6 +58,17 @@ export default function JobCard({ job, onRefresh }: Props) {
       setError(e instanceof Error ? e.message : 'Failed to generate docs')
     } finally {
       setGenerating(false)
+    }
+  }
+
+  async function dismiss() {
+    setDismissing(true)
+    try {
+      await api.jobs.dismiss(job.id)
+      onRefresh?.()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to dismiss')
+      setDismissing(false)
     }
   }
 
@@ -129,14 +141,14 @@ export default function JobCard({ job, onRefresh }: Props) {
           rel="noopener noreferrer"
           className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-slate-400 transition-colors"
         >
-          View Job ↗
+          View ↗
         </a>
         <button
           onClick={generateDocs}
           disabled={generating}
           className="text-xs px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-60 transition-colors"
         >
-          {generating ? 'Generating…' : '📄 Gen Docs'}
+          {generating ? 'Generating…' : '📄 Docs'}
         </button>
         <a
           href={api.applications.previewOnePager(job.id)}
@@ -152,6 +164,14 @@ export default function JobCard({ job, onRefresh }: Props) {
         >
           ↓ PDF
         </a>
+        <button
+          onClick={dismiss}
+          disabled={dismissing}
+          title="Hide this job"
+          className="text-xs px-2 py-1.5 rounded-lg border border-slate-200 text-slate-400 hover:border-red-300 hover:text-red-500 disabled:opacity-40 transition-colors ml-auto"
+        >
+          {dismissing ? '…' : '✕'}
+        </button>
       </div>
     </div>
   )

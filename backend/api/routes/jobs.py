@@ -1,8 +1,8 @@
-"""Jobs endpoints — search, list, rank."""
+"""Jobs endpoints — list, filter, dismiss, clear."""
 
 from fastapi import APIRouter, Depends, BackgroundTasks, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import select, desc, delete
 from core.database import get_db
 from models.job import Job
 from models.profile import UserProfile
@@ -131,3 +131,34 @@ async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     return job
+
+
+@router.patch("/{job_id}/dismiss")
+async def dismiss_job(job_id: str, db: AsyncSession = Depends(get_db)):
+    """Mark a job as dismissed — hides it from the default list."""
+    result = await db.execute(select(Job).where(Job.id == job_id))
+    job = result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job.status = "dismissed"
+    await db.commit()
+    return {"message": "Job dismissed."}
+
+
+@router.delete("/clear")
+async def clear_jobs(
+    portal: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Delete jobs from DB.
+    - portal=None  → delete ALL jobs (full reset)
+    - portal=linkedin → delete only LinkedIn jobs
+    Dismissed / applied jobs are also removed — use with care.
+    """
+    q = delete(Job)
+    if portal:
+        q = q.where(Job.portal == portal)
+    result = await db.execute(q)
+    await db.commit()
+    return {"message": f"Deleted {result.rowcount} job(s).", "deleted": result.rowcount}

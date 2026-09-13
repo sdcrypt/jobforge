@@ -3,7 +3,14 @@
 import { useState, useEffect, FormEvent } from 'react'
 import { api, SearchConfig } from '@/lib/api'
 
-const PORTALS = ['linkedin', 'indeed', 'mock']
+const PORTALS: { id: string; label: string; note?: string }[] = [
+  { id: 'linkedin',       label: '🔗 LinkedIn',          note: 'Public guest API — works well' },
+  { id: 'remoteok',       label: '🌍 RemoteOK',           note: 'Free API — remote tech jobs' },
+  { id: 'weworkremotely', label: '🏠 We Work Remotely',   note: 'RSS feed — senior remote roles' },
+  { id: 'hackernews',     label: '🟠 HackerNews Hiring',  note: 'Monthly thread — startup jobs' },
+  { id: 'indeed',         label: '🔍 Indeed',             note: '⚠ Often blocked by anti-bot' },
+  { id: 'mock',           label: '🤖 Mock',               note: 'Fake jobs — for testing only' },
+]
 
 const BLANK: Partial<SearchConfig> = {
   keywords: [],
@@ -72,12 +79,12 @@ export default function SearchPage() {
     }
   }
 
-  function togglePortal(portal: string) {
+  function togglePortal(portalId: string) {
     setForm((f) => {
       const current = f.portals ?? []
-      const next = current.includes(portal)
-        ? current.filter((p) => p !== portal)
-        : [...current, portal]
+      const next = current.includes(portalId)
+        ? current.filter((p) => p !== portalId)
+        : [...current, portalId]
       return { ...f, portals: next }
     })
   }
@@ -131,30 +138,30 @@ export default function SearchPage() {
         {/* Portals */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-3">
           <h2 className="font-semibold text-slate-700">Job Portals</h2>
-          <div className="flex gap-3 flex-wrap">
-            {PORTALS.map((portal) => {
-              const active = form.portals?.includes(portal)
+          <div className="grid grid-cols-2 gap-2">
+            {PORTALS.map(({ id, label, note }) => {
+              const active = form.portals?.includes(id)
               return (
                 <button
-                  key={portal}
+                  key={id}
                   type="button"
-                  onClick={() => togglePortal(portal)}
-                  className={`px-4 py-2 rounded-lg text-sm capitalize font-medium border transition-colors ${
+                  onClick={() => togglePortal(id)}
+                  className={`text-left px-3 py-2.5 rounded-lg border transition-colors ${
                     active
                       ? 'bg-brand-600 border-brand-600 text-white'
-                      : 'border-slate-200 text-slate-600 hover:border-slate-400'
+                      : 'border-slate-200 text-slate-700 hover:border-slate-400 bg-white'
                   }`}
                 >
-                  {portal === 'linkedin' ? '🔗 LinkedIn' :
-                   portal === 'indeed'   ? '🔍 Indeed' :
-                   '🤖 Mock (test)'}
+                  <div className="text-sm font-medium">{label}</div>
+                  {note && (
+                    <div className={`text-xs mt-0.5 ${active ? 'text-blue-200' : 'text-slate-400'}`}>
+                      {note}
+                    </div>
+                  )}
                 </button>
               )
             })}
           </div>
-          <p className="text-xs text-slate-400">
-            Mock generates fake jobs — useful for testing without internet / LLM.
-          </p>
         </div>
 
         {/* Options */}

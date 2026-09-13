@@ -148,6 +148,12 @@ export const api = {
       return req<{ jobs: Job[]; count: number }>(`/api/jobs?${qs}`)
     },
     get: (id: string) => req<Job>(`/api/jobs/${id}`),
+    dismiss: (id: string) =>
+      req<{ message: string }>(`/api/jobs/${id}/dismiss`, { method: 'PATCH' }),
+    clear: (portal?: string) => {
+      const qs = portal ? `?portal=${portal}` : ''
+      return req<{ message: string; deleted: number }>(`/api/jobs/clear${qs}`, { method: 'DELETE' })
+    },
   },
 
   // ── Applications ─────────────────────────────────────────────────────────

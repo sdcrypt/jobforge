@@ -3,7 +3,8 @@
 import useSWR from 'swr'
 import { api, Job } from '@/lib/api'
 
-const fetcher = () => api.jobs.list({ limit: 100 }).then((r) => r.jobs)
+// Fetch up to 200 jobs (dismissed ones are hidden in the jobs page filter)
+const fetcher = () => api.jobs.list({ limit: 200 }).then((r) => r.jobs)
 
 export function useJobs() {
   const { data, error, isLoading, mutate } = useSWR<Job[]>('/api/jobs', fetcher, {
@@ -11,7 +12,9 @@ export function useJobs() {
   })
 
   return {
-    jobs: data ?? [],
+    // Exclude dismissed jobs from the default list
+    jobs: (data ?? []).filter((j) => j.status !== 'dismissed'),
+    allJobs: data ?? [],
     isLoading,
     error,
     refresh: mutate,
