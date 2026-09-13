@@ -6,19 +6,18 @@ Portals:
   linkedin        — LinkedIn public guest API (no auth)
   remoteok        — RemoteOK free public JSON API
   weworkremotely  — We Work Remotely RSS feed
-  hackernews      — HackerNews "Who is Hiring" (via Algolia search API)
+  hackernews      — HackerNews "Who is Hiring" (Algolia search API)
   naukri          — Naukri public search results (best-effort HTML scraper)
-  mock            — Fake jobs for local testing without internet
 
-Rate limiting and deduplication are handled here.
-Results are stored in the DB by the pipeline (pipeline.py).
+Rate limiting and in-memory deduplication are handled here.
+Final DB deduplication (URL + company+title) is done in pipeline.py.
 """
 
 import asyncio
 import random
 import httpx
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
+from datetime import datetime
 from dateutil import parser as dateutil_parser
 from urllib.parse import quote_plus
 from core.config import settings
@@ -34,6 +33,8 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
 ]
 
+SUPPORTED_PORTALS = {"linkedin", "remoteok", "weworkremotely", "hackernews", "naukri"}
+
 
 def _ua() -> str:
     return random.choice(USER_AGENTS)
@@ -43,7 +44,7 @@ def _safe_date(raw: str | None) -> datetime | None:
     if not raw:
         return None
     try:
-        return dateutil_parser.parse(raw, ignoretz=True)
+        return dateutil_parser.parse(str(raw), ignoretz=True)
     except Exception:
         return None
 
@@ -62,15 +63,21 @@ class SearchAgent(BaseAgent):
         remote_only: bool = False,
         posted_within_days: int = 7,
     ) -> list[dict]:
+        # Filter out any unsupported portals silently
+        active_portals = [p for p in portals if p in SUPPORTED_PORTALS]
+        if not active_portals:
+            await self.emit("error", "No supported portals selected. Choose from: " + ", ".join(SUPPORTED_PORTALS))
+            return []
+
         await self.emit(
             "started",
-            f"Searching {len(portals)} portal(s) — "
+            f"Searching {len(active_portals)} portal(s) — "
             f"{len(keywords)} keyword(s) × {len(locations)} location(s)…",
         )
 
         combos = [
             (portal, keyword, location)
-            for portal in portals
+            for portal in active_portals
             for keyword in keywords
             for location in locations
         ]
@@ -103,8 +110,8 @@ class SearchAgent(BaseAgent):
 
         await self.emit(
             "done",
-            f"Found {len(all_jobs)} unique jobs across {len(portals)} portal(s).",
-            {"count": len(all_jobs), "portals": portals},
+            f"Found {len(all_jobs)} unique jobs across {len(active_portals)} portal(s).",
+            {"count": len(all_jobs), "portals": active_portals},
         )
         return all_jobs
 
@@ -124,25 +131,19 @@ class SearchAgent(BaseAgent):
                 return await self._search_hackernews(keyword, remote_only)
             elif portal == "naukri":
                 return await self._search_naukri(keyword, location, remote_only)
-            elif portal == "indeed":
-                return await self._search_indeed(keyword, location, remote_only)
-            elif portal == "mock":
-                return self._mock_jobs(keyword, location)
             else:
-                log.warning("search.unknown_portal", portal=portal)
                 return []
         except Exception as e:
             log.warning("search.portal_error", portal=portal, error=str(e))
             return []
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # PORTAL: LinkedIn
+    # PORTAL: LinkedIn  — public guest API, no login required
     # ═══════════════════════════════════════════════════════════════════════════
 
     async def _search_linkedin(
         self, keyword: str, location: str, remote_only: bool
     ) -> list[dict]:
-        """LinkedIn public guest jobs API — no auth required."""
         params = {
             "keywords": keyword,
             "location": location,
@@ -152,8 +153,10 @@ class SearchAgent(BaseAgent):
         if remote_only:
             params["f_WT"] = "2"
 
-        url = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search"
-        raw = await self._fetch(url, params=params)
+        raw = await self._fetch(
+            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search",
+            params=params,
+        )
         if not raw:
             return []
 
@@ -175,59 +178,47 @@ class SearchAgent(BaseAgent):
                 return None
             url = link["href"].split("?")[0]
 
-            title_el = card.find("h3", class_="base-search-card__title")
+            title_el   = card.find("h3", class_="base-search-card__title")
             company_el = card.find("h4", class_="base-search-card__subtitle")
             location_el = card.find("span", class_="job-search-card__location")
-            date_el = card.find("time")
-
-            posted_at = None
-            if date_el and date_el.get("datetime"):
-                posted_at = _safe_date(date_el["datetime"][:10])
+            date_el    = card.find("time")
 
             loc_text = location_el.get_text(strip=True) if location_el else ""
             return {
-                "url": url,
-                "title": title_el.get_text(strip=True) if title_el else keyword,
-                "company": company_el.get_text(strip=True) if company_el else "Unknown",
-                "location": loc_text,
-                "portal": "linkedin",
-                "remote": "remote" in loc_text.lower(),
-                "posted_at": posted_at,
-                "status": "new",
+                "url":       url,
+                "title":     title_el.get_text(strip=True) if title_el else keyword,
+                "company":   company_el.get_text(strip=True) if company_el else "Unknown",
+                "location":  loc_text,
+                "portal":    "linkedin",
+                "remote":    "remote" in loc_text.lower(),
+                "posted_at": _safe_date(date_el["datetime"][:10] if date_el and date_el.get("datetime") else None),
+                "status":    "new",
             }
         except Exception as e:
             log.debug("search.linkedin_parse_err", error=str(e))
             return None
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # PORTAL: RemoteOK  (free public JSON API — https://remoteok.com/api)
+    # PORTAL: RemoteOK  — free public JSON API, no auth
     # ═══════════════════════════════════════════════════════════════════════════
 
     async def _search_remoteok(self, keyword: str, location: str) -> list[dict]:
-        """
-        RemoteOK free API.  Returns all remote tech jobs; we filter locally by keyword.
-        Rate limit note: they ask for ≤1 req/hour. The pipeline semaphore + delay handles this.
-        """
         try:
             async with httpx.AsyncClient(
                 timeout=20,
                 follow_redirects=True,
-                headers={
-                    "User-Agent": _ua(),
-                    "Accept": "application/json",
-                },
+                headers={"User-Agent": _ua(), "Accept": "application/json"},
             ) as client:
                 resp = await client.get("https://remoteok.com/api")
                 if resp.status_code != 200:
                     log.warning("search.remoteok_http", status=resp.status_code)
                     return []
-
                 data = resp.json()
         except Exception as e:
             log.warning("search.remoteok_error", error=str(e))
             return []
 
-        # First item is legal notice — skip
+        # First element is a legal notice — skip non-job entries
         raw_jobs = [j for j in data if isinstance(j, dict) and j.get("position")]
 
         kw_words = keyword.lower().split()
@@ -242,25 +233,25 @@ class SearchAgent(BaseAgent):
             if not all(w in search_text for w in kw_words):
                 continue
 
-            salary = None
             lo, hi = job.get("salary_min"), job.get("salary_max")
+            salary = None
             if lo and hi:
                 salary = f"${int(lo)//1000}k–${int(hi)//1000}k"
             elif lo:
                 salary = f"${int(lo)//1000}k+"
 
             jobs.append({
-                "url": job.get("url") or f"https://remoteok.com/remote-jobs/{job.get('id')}",
-                "title": job.get("position", keyword),
-                "company": job.get("company", "Unknown"),
-                "location": "Remote",
-                "portal": "remoteok",
-                "remote": True,
+                "url":         job.get("url") or f"https://remoteok.com/remote-jobs/{job.get('id')}",
+                "title":       job.get("position", keyword),
+                "company":     job.get("company", "Unknown"),
+                "location":    "Remote",
+                "portal":      "remoteok",
+                "remote":      True,
                 "salary_range": salary,
-                "job_type": "full-time",
+                "job_type":    "full-time",
                 "description": BeautifulSoup(job.get("description", ""), "html.parser").get_text()[:500],
-                "posted_at": _safe_date(job.get("date")),
-                "status": "new",
+                "posted_at":   _safe_date(job.get("date")),
+                "status":      "new",
             })
 
             if len(jobs) >= 15:
@@ -270,76 +261,67 @@ class SearchAgent(BaseAgent):
         return jobs
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # PORTAL: We Work Remotely  (RSS feed)
+    # PORTAL: We Work Remotely  — RSS feeds, no auth
     # ═══════════════════════════════════════════════════════════════════════════
 
-    WEWORKREMOTELY_FEEDS = [
+    _WWR_FEEDS = [
         "https://weworkremotely.com/categories/remote-programming-jobs.rss",
         "https://weworkremotely.com/categories/remote-devops-sysadmin-jobs.rss",
         "https://weworkremotely.com/categories/remote-management-and-finance-jobs.rss",
     ]
 
     async def _search_weworkremotely(self, keyword: str) -> list[dict]:
-        """We Work Remotely public RSS feeds — no auth required."""
         kw_words = keyword.lower().split()
         jobs: list[dict] = []
         seen: set[str] = set()
 
-        for feed_url in self.WEWORKREMOTELY_FEEDS:
+        for feed_url in self._WWR_FEEDS:
             raw = await self._fetch(feed_url)
             if not raw:
                 continue
 
             soup = BeautifulSoup(raw, "html.parser")
-            items = soup.find_all("item")
-
-            for item in items:
+            for item in soup.find_all("item"):
                 title_el = item.find("title")
-                # WWR titles are like: "Company: Job Title"
                 title_raw = title_el.get_text(strip=True) if title_el else ""
-                title_parts = title_raw.split(": ", 1)
-                company = title_parts[0].strip() if len(title_parts) > 1 else "Unknown"
-                title = title_parts[1].strip() if len(title_parts) > 1 else title_raw
+                # WWR titles: "Company: Job Title"
+                parts = title_raw.split(": ", 1)
+                company = parts[0].strip() if len(parts) > 1 else "Unknown"
+                title   = parts[1].strip() if len(parts) > 1 else title_raw
 
-                desc_el = item.find("description")
+                desc_el   = item.find("description")
                 desc_text = BeautifulSoup(
                     desc_el.get_text(strip=True) if desc_el else "", "html.parser"
                 ).get_text()
 
-                search_text = f"{title} {desc_text}".lower()
-                if not all(w in search_text for w in kw_words):
+                if not all(w in f"{title} {desc_text}".lower() for w in kw_words):
                     continue
 
-                # WWR RSS: link text is between <link> tags (CDATA quirk)
+                # RSS <link> is a sibling text node in some parsers
                 link_el = item.find("link")
-                url = ""
-                if link_el:
-                    # In RSS, <link> is often a sibling text node, not element text
-                    url = link_el.next_sibling or link_el.get_text(strip=True) or ""
-                    url = str(url).strip()
+                url = str(link_el.next_sibling or link_el.get_text(strip=True) or "").strip()
                 if not url or url in seen:
                     continue
+                if not url.startswith("http"):
+                    url = f"https://weworkremotely.com{url}"
 
                 seen.add(url)
+                pub_el = item.find("pubdate")
                 jobs.append({
-                    "url": url if url.startswith("http") else f"https://weworkremotely.com{url}",
-                    "title": title,
-                    "company": company,
+                    "url":      url,
+                    "title":    title,
+                    "company":  company,
                     "location": "Remote",
-                    "portal": "weworkremotely",
-                    "remote": True,
-                    "salary_range": None,
+                    "portal":   "weworkremotely",
+                    "remote":   True,
                     "job_type": "full-time",
                     "description": desc_text[:500],
-                    "posted_at": _safe_date(
-                        item.find("pubdate") and item.find("pubdate").get_text(strip=True)
-                    ),
-                    "status": "new",
+                    "posted_at": _safe_date(pub_el.get_text(strip=True) if pub_el else None),
+                    "status":   "new",
                 })
 
                 if len(jobs) >= 15:
                     break
-
             if len(jobs) >= 15:
                 break
 
@@ -347,44 +329,35 @@ class SearchAgent(BaseAgent):
         return jobs
 
     # ═══════════════════════════════════════════════════════════════════════════
-    # PORTAL: HackerNews "Who is Hiring"  (Algolia HN search API)
+    # PORTAL: HackerNews "Who is Hiring"  — Algolia search API, no auth
     # ═══════════════════════════════════════════════════════════════════════════
 
     async def _search_hackernews(self, keyword: str, remote_only: bool) -> list[dict]:
-        """
-        Searches HackerNews 'Who is Hiring' monthly thread via Algolia API.
-        No auth required.  Algolia already filters comments by keyword for us.
-        """
         try:
             async with httpx.AsyncClient(timeout=15) as client:
 
-                # Step 1: Find the latest "Who is Hiring" story ID
+                # Step 1 — find latest "Who is Hiring" story
                 r1 = await client.get(
                     "https://hn.algolia.com/api/v1/search_by_date",
                     params={"tags": "ask_hn,who_is_hiring", "hitsPerPage": 1},
                 )
                 if r1.status_code != 200:
                     return []
-
                 hits = r1.json().get("hits", [])
                 if not hits:
                     return []
 
                 story_id = hits[0]["objectID"]
-                story_title = hits[0].get("title", "Who is Hiring")
-                log.info("search.hackernews_thread", story_id=story_id, title=story_title)
+                log.info("search.hackernews_thread", story_id=story_id)
 
-                # Step 2: Search comments in that story for our keyword
-                query = keyword
-                if remote_only:
-                    query = f"{keyword} remote"
-
+                # Step 2 — search comments in that story for our keyword
+                query = f"{keyword} remote" if remote_only else keyword
                 r2 = await client.get(
                     "https://hn.algolia.com/api/v1/search_by_date",
                     params={
-                        "tags": f"comment,story_{story_id}",
-                        "query": query,
-                        "hitsPerPage": 20,
+                        "tags":         f"comment,story_{story_id}",
+                        "query":        query,
+                        "hitsPerPage":  20,
                     },
                 )
                 if r2.status_code != 200:
@@ -399,38 +372,34 @@ class SearchAgent(BaseAgent):
         for hit in comment_hits:
             text_html = hit.get("comment_text", "") or ""
             text = BeautifulSoup(text_html, "html.parser").get_text()
-
             if not text.strip():
                 continue
-
             if remote_only and "remote" not in text.lower():
                 continue
 
-            # First line is usually "Company | Role | Location | ..." or "Company: Role"
+            # First line is usually "Company | Role | Location | ..."
             first_line = text.split("\n")[0].strip()[:120]
-            parts = [p.strip() for p in first_line.replace("|", "·").split("·")]
+            parts  = [p.strip() for p in first_line.replace("|", "·").split("·")]
             company = parts[0] if parts else "Unknown"
 
-            # Infer title from keyword + context
+            # Try to find a role-sounding part
             title = keyword
             for part in parts[1:]:
-                p_lower = part.lower()
-                if any(w in p_lower for w in ["engineer", "developer", "lead", "manager", "designer"]):
+                if any(w in part.lower() for w in ["engineer", "developer", "lead", "manager", "designer", "scientist"]):
                     title = part
                     break
 
             jobs.append({
-                "url": f"https://news.ycombinator.com/item?id={hit['objectID']}",
-                "title": title or keyword,
-                "company": company[:100],
-                "location": "See post (often Remote)",
-                "portal": "hackernews",
-                "remote": "remote" in text.lower(),
-                "salary_range": None,
-                "job_type": "full-time",
+                "url":         f"https://news.ycombinator.com/item?id={hit['objectID']}",
+                "title":       title or keyword,
+                "company":     company[:100],
+                "location":    "Remote / See post",
+                "portal":      "hackernews",
+                "remote":      "remote" in text.lower(),
+                "job_type":    "full-time",
                 "description": text[:500],
-                "posted_at": _safe_date(hit.get("created_at")),
-                "status": "new",
+                "posted_at":   _safe_date(hit.get("created_at")),
+                "status":      "new",
             })
 
         log.info("search.hackernews", keyword=keyword, matched=len(jobs))
@@ -555,125 +524,18 @@ class SearchAgent(BaseAgent):
             log.debug("search.naukri_parse_err", error=str(e))
             return None
 
-    # ═══════════════════════════════════════════════════════════════════════════
-    # PORTAL: Indeed  (note: often blocked by Cloudflare — unreliable)
-    # ═══════════════════════════════════════════════════════════════════════════
-
-    async def _search_indeed(
-        self, keyword: str, location: str, remote_only: bool
-    ) -> list[dict]:
-        """
-        Indeed HTML scraper.
-        WARNING: Indeed uses Cloudflare anti-bot — this frequently returns 0 results.
-        Use RemoteOK / WWR / HackerNews instead for reliable results.
-        """
-        params = {
-            "q": keyword,
-            "l": "" if remote_only else location,
-            "sort": "date",
-            "fromage": "7",
-        }
-        if remote_only:
-            params["remotejob"] = "032b3046-06a3-4876-8dfd-474eb5e7ed11"
-
-        raw = await self._fetch("https://www.indeed.com/jobs", params=params)
-        if not raw:
-            return []
-
-        soup = BeautifulSoup(raw, "html.parser")
-        cards = soup.find_all("div", class_="job_seen_beacon")
-        if not cards:
-            cards = soup.find_all("div", attrs={"data-testid": "slider_item"})
-
-        log.info("search.indeed", keyword=keyword, cards=len(cards))
-
-        jobs = []
-        for card in cards[:15]:
-            job = self._parse_indeed_card(card, keyword, location)
-            if job:
-                jobs.append(job)
-        return jobs
-
-    def _parse_indeed_card(self, card, keyword: str, location: str) -> dict | None:
-        try:
-            link = card.find("a", class_="jcs-JobTitle") or card.find("a", href=True)
-            if not link:
-                return None
-
-            href = link.get("href", "")
-            url = f"https://www.indeed.com{href}" if href.startswith("/") else href
-
-            company_el = (
-                card.find("span", attrs={"data-testid": "company-name"})
-                or card.find("span", class_="companyName")
-            )
-            location_el = (
-                card.find("div", attrs={"data-testid": "text-location"})
-                or card.find("div", class_="companyLocation")
-            )
-            salary_el = (
-                card.find("div", attrs={"data-testid": "attribute_snippet_testid"})
-                or card.find("span", class_="salary-snippet")
-            )
-
-            loc_text = location_el.get_text(strip=True) if location_el else location
-            return {
-                "url": url,
-                "title": link.get_text(strip=True),
-                "company": company_el.get_text(strip=True) if company_el else "Unknown",
-                "location": loc_text,
-                "portal": "indeed",
-                "remote": "remote" in loc_text.lower(),
-                "salary_range": salary_el.get_text(strip=True) if salary_el else None,
-                "posted_at": None,
-                "status": "new",
-            }
-        except Exception as e:
-            log.debug("search.indeed_parse_err", error=str(e))
-            return None
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # PORTAL: Mock  (local testing — no internet / LLM needed)
-    # ═══════════════════════════════════════════════════════════════════════════
-
-    def _mock_jobs(self, keyword: str, location: str) -> list[dict]:
-        companies = ["Stripe", "Notion", "Linear", "Vercel", "Supabase", "Planetscale",
-                     "Figma", "Retool", "Loom", "Pitch"]
-        roles = [keyword, f"Senior {keyword}", f"Staff {keyword}", f"Lead {keyword}"]
-
-        return [
-            {
-                "url": f"https://mock.jobforge.dev/jobs/{i}-{keyword.lower().replace(' ', '-')}",
-                "title": random.choice(roles),
-                "company": random.choice(companies),
-                "location": location,
-                "portal": "mock",
-                "remote": True,
-                "salary_range": f"${random.randint(80, 150)}k–${random.randint(150, 220)}k",
-                "job_type": "full-time",
-                "description": (
-                    f"We are looking for a {keyword} to join our growing team. "
-                    f"You'll work on exciting distributed systems and product challenges."
-                ),
-                "posted_at": datetime.utcnow() - timedelta(days=random.randint(0, 5)),
-                "status": "new",
-            }
-            for i in range(1, 6)
-        ]
-
     # ── HTTP helper ───────────────────────────────────────────────────────────
 
     async def _fetch(self, url: str, params: dict | None = None) -> str | None:
-        headers = {
-            "User-Agent": _ua(),
-            "Accept-Language": "en-US,en;q=0.9",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        }
         try:
             async with httpx.AsyncClient(
                 timeout=15,
                 follow_redirects=True,
-                headers=headers,
+                headers={
+                    "User-Agent":      _ua(),
+                    "Accept-Language": "en-US,en;q=0.9",
+                    "Accept":          "text/html,application/xhtml+xml,*/*;q=0.8",
+                },
             ) as client:
                 resp = await client.get(url, params=params)
                 if resp.status_code == 200:

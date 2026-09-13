@@ -3,21 +3,19 @@
 import { useState, useEffect, FormEvent } from 'react'
 import { api, SearchConfig } from '@/lib/api'
 
-const PORTALS: { id: string; label: string; note?: string }[] = [
-  { id: 'linkedin',       label: '🔗 LinkedIn',          note: 'Public guest API — works well' },
-  { id: 'remoteok',       label: '🌍 RemoteOK',           note: 'Free API — remote tech jobs' },
-  { id: 'weworkremotely', label: '🏠 We Work Remotely',   note: 'RSS feed — senior remote roles' },
-  { id: 'hackernews',     label: '🟠 HackerNews Hiring',  note: 'Monthly thread — startup jobs' },
-  { id: 'naukri',         label: '🇮🇳 Naukri',             note: 'Best-effort India jobs scraper' },
-  { id: 'indeed',         label: '🔍 Indeed',             note: '⚠ Often blocked by anti-bot' },
-  { id: 'mock',           label: '🤖 Mock',               note: 'Fake jobs — for testing only' },
+const PORTALS: { id: string; label: string; note: string }[] = [
+  { id: 'linkedin',       label: '🔗 LinkedIn',         note: 'Public guest API — works well' },
+  { id: 'remoteok',       label: '🌍 RemoteOK',          note: 'Free JSON API — remote tech jobs with salary' },
+  { id: 'weworkremotely', label: '🏠 We Work Remotely',  note: 'RSS feed — senior remote roles' },
+  { id: 'hackernews',     label: '🟠 HackerNews Hiring', note: 'Monthly thread — startup & founding roles' },
+  { id: 'naukri',         label: '🇮🇳 Naukri',            note: 'Best-effort India jobs scraper' },
 ]
-const SUPPORTED_PORTAL_IDS = new Set(PORTALS.map((portal) => portal.id))
+const SUPPORTED_PORTAL_IDS = new Set(PORTALS.map((p) => p.id))
 
 const BLANK: Partial<SearchConfig> = {
   keywords: [],
   locations: [],
-  portals: ['linkedin', 'naukri', 'mock'],
+  portals: ['linkedin', 'remoteok', 'weworkremotely', 'hackernews', 'naukri'],
   remote_only: false,
   posted_within_days: 7,
   run_every_hours: 12,
