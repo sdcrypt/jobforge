@@ -7,7 +7,6 @@ Portals:
   remoteok        — RemoteOK free public JSON API
   weworkremotely  — We Work Remotely RSS feed
   hackernews      — HackerNews "Who is Hiring" (Algolia search API)
-  naukri          — Naukri public search results (best-effort HTML scraper)
 
 Rate limiting and in-memory deduplication are handled here.
 Final DB deduplication (URL + company+title) is done in pipeline.py.
@@ -19,7 +18,6 @@ import httpx
 from bs4 import BeautifulSoup
 from datetime import datetime
 from dateutil import parser as dateutil_parser
-from urllib.parse import quote_plus
 from core.config import settings
 from agents.base import BaseAgent
 import structlog
@@ -33,7 +31,7 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
 ]
 
-SUPPORTED_PORTALS = {"linkedin", "remoteok", "weworkremotely", "hackernews", "naukri"}
+SUPPORTED_PORTALS = {"linkedin", "remoteok", "weworkremotely", "hackernews"}
 
 
 def _ua() -> str:
@@ -129,8 +127,6 @@ class SearchAgent(BaseAgent):
                 return await self._search_weworkremotely(keyword)
             elif portal == "hackernews":
                 return await self._search_hackernews(keyword, remote_only)
-            elif portal == "naukri":
-                return await self._search_naukri(keyword, location, remote_only)
             else:
                 return []
         except Exception as e:
@@ -404,125 +400,6 @@ class SearchAgent(BaseAgent):
 
         log.info("search.hackernews", keyword=keyword, matched=len(jobs))
         return jobs
-
-    # ═══════════════════════════════════════════════════════════════════════════
-    # PORTAL: Naukri  (best-effort public search results scraper)
-    # ═══════════════════════════════════════════════════════════════════════════
-
-    async def _search_naukri(
-        self, keyword: str, location: str, remote_only: bool
-    ) -> list[dict]:
-        """
-        Naukri public search results scraper.
-        Naukri can block or change markup, so this adapter is best-effort.
-        """
-        search_location = "remote" if remote_only else location
-        params = {
-            "k": keyword,
-            "l": search_location,
-            "sort": "f",
-        }
-
-        raw = await self._fetch("https://www.naukri.com/jobs-in-india", params=params)
-
-        # Fallback to the SEO-style URL Naukri commonly serves.
-        if not raw:
-            keyword_slug = quote_plus(keyword.lower().replace(" ", "-"))
-            location_slug = quote_plus(search_location.lower().replace(" ", "-"))
-            raw = await self._fetch(
-                f"https://www.naukri.com/{keyword_slug}-jobs-in-{location_slug}"
-            )
-
-        if not raw:
-            return []
-
-        soup = BeautifulSoup(raw, "html.parser")
-        cards = soup.select(
-            "div.srp-jobtuple-wrapper, "
-            "div.cust-job-tuple, "
-            "article.jobTuple, "
-            "div.jobTuple"
-        )
-
-        log.info("search.naukri", keyword=keyword, location=search_location, cards=len(cards))
-
-        jobs = []
-        for card in cards[:15]:
-            job = self._parse_naukri_card(card, keyword, search_location)
-            if job:
-                jobs.append(job)
-
-        return jobs
-
-    def _parse_naukri_card(
-        self, card, keyword: str, location: str
-    ) -> dict | None:
-        try:
-            link = (
-                card.select_one("a.title")
-                or card.select_one("a[title]")
-                or card.find("a", href=True)
-            )
-            if not link:
-                return None
-
-            href = link.get("href", "")
-            if not href:
-                return None
-
-            title = link.get_text(" ", strip=True) or link.get("title") or keyword
-
-            company_el = (
-                card.select_one(".comp-name")
-                or card.select_one(".companyName")
-                or card.select_one("a.subTitle")
-                or card.select_one(".subTitle")
-            )
-            location_el = (
-                card.select_one(".locWdth")
-                or card.select_one(".location")
-                or card.select_one("[class*=loc]")
-            )
-            salary_el = (
-                card.select_one(".sal-wrap")
-                or card.select_one(".salary")
-                or card.select_one("[class*=salary]")
-            )
-            desc_el = (
-                card.select_one(".job-desc")
-                or card.select_one(".job-description")
-                or card.select_one("[class*=job-desc]")
-            )
-            date_el = (
-                card.select_one(".job-post-day")
-                or card.select_one(".type")
-                or card.select_one("[class*=date]")
-            )
-
-            loc_text = location_el.get_text(" ", strip=True) if location_el else location
-            description = desc_el.get_text(" ", strip=True) if desc_el else ""
-            posted_text = date_el.get_text(" ", strip=True) if date_el else None
-
-            return {
-                "url": href,
-                "title": title,
-                "company": (
-                    company_el.get_text(" ", strip=True) if company_el else "Unknown"
-                ),
-                "location": loc_text,
-                "portal": "naukri",
-                "remote": "remote" in f"{loc_text} {description}".lower(),
-                "salary_range": (
-                    salary_el.get_text(" ", strip=True) if salary_el else None
-                ),
-                "job_type": "full-time",
-                "description": description[:500] if description else None,
-                "posted_at": _safe_date(posted_text),
-                "status": "new",
-            }
-        except Exception as e:
-            log.debug("search.naukri_parse_err", error=str(e))
-            return None
 
     # ── HTTP helper ───────────────────────────────────────────────────────────
 

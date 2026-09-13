@@ -16,14 +16,13 @@ SUPPORTED_PORTALS = {
     "remoteok",
     "weworkremotely",
     "hackernews",
-    "naukri",
 }
 
 
 class SearchConfigCreate(BaseModel):
     keywords: list[str]
     locations: list[str] = ["remote"]
-    portals: list[str] = ["linkedin", "remoteok", "weworkremotely", "hackernews", "naukri"]
+    portals: list[str] = ["linkedin", "remoteok", "weworkremotely", "hackernews"]
     remote_only: bool = False
     posted_within_days: int = 7
     active: bool = True
