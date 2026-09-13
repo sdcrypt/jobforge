@@ -3,10 +3,16 @@ JobForge — Celery Tasks
 """
 
 import asyncio
+import sys
+from pathlib import Path
 from workers.celery_app import celery_app
 import structlog
 
 log = structlog.get_logger()
+
+APP_DIR = Path(__file__).resolve().parents[1]
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
 
 
 @celery_app.task(name="workers.tasks.run_search_pipeline", bind=True, max_retries=2)
