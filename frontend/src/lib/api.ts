@@ -37,6 +37,10 @@ export interface Job {
   growth_score: number | null
   strengths: string[] | null
   gaps: string[] | null
+  // Research Agent fields (populated after clicking Research)
+  fit_summary: string | null
+  talking_points: string[] | null
+  researched_at: string | null
   status: string
   found_at: string
 }
@@ -150,6 +154,12 @@ export const api = {
     get: (id: string) => req<Job>(`/api/jobs/${id}`),
     dismiss: (id: string) =>
       req<{ message: string }>(`/api/jobs/${id}/dismiss`, { method: 'PATCH' }),
+    /** Run Research Agent — AI fit analysis against profile. Returns updated scores. */
+    research: (id: string) =>
+      req<{ message: string; job_id: string; fit_score: number | null; fit_summary: string | null; talking_points: string[] | null; strengths: string[] | null; gaps: string[] | null }>(
+        `/api/jobs/${id}/research`,
+        { method: 'POST' },
+      ),
     clear: (portal?: string) => {
       const qs = portal ? `?portal=${portal}` : ''
       return req<{ message: string; deleted: number }>(`/api/jobs/clear${qs}`, { method: 'DELETE' })

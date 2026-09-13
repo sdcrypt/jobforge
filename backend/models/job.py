@@ -32,7 +32,7 @@ class Job(Base):
     posted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     deadline: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    # Rank Agent scores (filled after ranking)
+    # Rank / Research Agent scores (filled after research)
     fit_score: Mapped[float | None] = mapped_column(Float, nullable=True)      # 0–100 overall
     tech_score: Mapped[float | None] = mapped_column(Float, nullable=True)     # technical fit
     exp_score: Mapped[float | None] = mapped_column(Float, nullable=True)      # experience fit
@@ -40,6 +40,9 @@ class Job(Base):
     growth_score: Mapped[float | None] = mapped_column(Float, nullable=True)   # career growth
     strengths: Mapped[list | None] = mapped_column(JSON, nullable=True)        # ["Python match", ...]
     gaps: Mapped[list | None] = mapped_column(JSON, nullable=True)             # ["Needs Kubernetes"]
+    fit_summary: Mapped[str | None] = mapped_column(Text, nullable=True)       # 2-3 sentence honest assessment
+    talking_points: Mapped[list | None] = mapped_column(JSON, nullable=True)   # interview / cover-letter tips
+    researched_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Status
     status: Mapped[str] = mapped_column(

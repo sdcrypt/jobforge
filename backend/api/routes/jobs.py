@@ -1,4 +1,4 @@
-"""Jobs endpoints — list, filter, dismiss, clear."""
+"""Jobs endpoints — list, filter, dismiss, clear, research."""
 
 from fastapi import APIRouter, Depends, BackgroundTasks, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -143,6 +143,50 @@ async def dismiss_job(job_id: str, db: AsyncSession = Depends(get_db)):
     job.status = "dismissed"
     await db.commit()
     return {"message": "Job dismissed."}
+
+
+@router.post("/{job_id}/research")
+async def research_job(job_id: str, db: AsyncSession = Depends(get_db)):
+    """
+    Run the Research Agent on a single job.
+    Fetches the full description, scores fit against the user's profile,
+    and persists the analysis (fit_score, strengths, gaps, talking_points …)
+    back to the Job record.
+
+    This call is synchronous — it waits for the LLM and returns the result.
+    Watch ws://localhost:8000/ws for live progress events.
+    """
+    # Load job
+    job_result = await db.execute(select(Job).where(Job.id == job_id))
+    job = job_result.scalar_one_or_none()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Load user profile (required for analysis)
+    profile_result = await db.execute(select(UserProfile).limit(1))
+    profile = profile_result.scalar_one_or_none()
+    if not profile:
+        raise HTTPException(
+            status_code=400,
+            detail="No profile found. Please fill in your profile before running research.",
+        )
+
+    profile_dict = {
+        "full_name":         profile.full_name,
+        "headline":          profile.headline,
+        "summary":           profile.summary,
+        "skills":            profile.skills or [],
+        "experience":        profile.experience or [],
+        "education":         profile.education or [],
+        "target_roles":      profile.target_roles or [],
+        "remote_preference": profile.remote_preference,
+    }
+
+    from agents.research import ResearchAgent
+    agent = ResearchAgent(db=db, job_id=job_id)
+    analysis = await agent.run(job_id=job_id, profile=profile_dict)
+
+    return {"message": "Research complete", "job_id": job_id, **analysis}
 
 
 @router.delete("/clear")

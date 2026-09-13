@@ -32,9 +32,28 @@ class Base(DeclarativeBase):
 
 
 async def init_db():
-    """Create all tables on startup."""
+    """Create all tables on startup. Also runs lightweight column migrations for SQLite."""
+    from sqlalchemy import text
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+        # ── Lightweight migrations: add new columns to existing tables ────────
+        # SQLAlchemy create_all won't add columns to tables that already exist.
+        # These ALTER TABLE statements are idempotent — they silently fail if the
+        # column is already there, which is the desired behaviour in dev/prod.
+        _new_columns = [
+            ("jobs", "fit_summary",    "TEXT"),
+            ("jobs", "talking_points", "JSON"),
+            ("jobs", "researched_at",  "DATETIME"),
+        ]
+        for table, col, col_type in _new_columns:
+            try:
+                await conn.execute(
+                    text(f"ALTER TABLE {table} ADD COLUMN {col} {col_type}")
+                )
+            except Exception:
+                pass  # column already exists — safe to ignore
 
 
 async def get_db():
