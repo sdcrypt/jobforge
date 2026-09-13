@@ -8,6 +8,7 @@ const PORTALS: { id: string; label: string; note?: string }[] = [
   { id: 'remoteok',       label: '🌍 RemoteOK',           note: 'Free API — remote tech jobs' },
   { id: 'weworkremotely', label: '🏠 We Work Remotely',   note: 'RSS feed — senior remote roles' },
   { id: 'hackernews',     label: '🟠 HackerNews Hiring',  note: 'Monthly thread — startup jobs' },
+  { id: 'naukri',         label: '🇮🇳 Naukri',             note: 'Best-effort India jobs scraper' },
   { id: 'indeed',         label: '🔍 Indeed',             note: '⚠ Often blocked by anti-bot' },
   { id: 'mock',           label: '🤖 Mock',               note: 'Fake jobs — for testing only' },
 ]
@@ -16,7 +17,7 @@ const SUPPORTED_PORTAL_IDS = new Set(PORTALS.map((portal) => portal.id))
 const BLANK: Partial<SearchConfig> = {
   keywords: [],
   locations: [],
-  portals: ['linkedin', 'indeed', 'mock'],
+  portals: ['linkedin', 'naukri', 'mock'],
   remote_only: false,
   posted_within_days: 7,
   run_every_hours: 12,
