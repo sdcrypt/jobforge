@@ -11,7 +11,7 @@ from models.profile import UserProfile
 
 router = APIRouter(prefix="/api/profile", tags=["profile"])
 
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc"}
+ALLOWED_EXTENSIONS = {".pdf", ".docx"}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
 
 

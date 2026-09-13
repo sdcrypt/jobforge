@@ -70,13 +70,17 @@ class ResumeParser(BaseAgent):
 
     # ── Public entry points ───────────────────────────────────────────────
 
+    async def run(self, raw_text: str) -> dict:
+        """Parse raw resume text into structured profile data."""
+        return await self._parse_text(raw_text)
+
     async def parse_pdf(self, file_bytes: bytes) -> dict:
         text = self._extract_pdf(file_bytes)
-        return await self._parse_text(text)
+        return await self.run(text)
 
     async def parse_docx(self, file_bytes: bytes) -> dict:
         text = self._extract_docx(file_bytes)
-        return await self._parse_text(text)
+        return await self.run(text)
 
     # ── Text extraction ───────────────────────────────────────────────────
 
