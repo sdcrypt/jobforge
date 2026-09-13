@@ -11,6 +11,7 @@ const PORTALS: { id: string; label: string; note?: string }[] = [
   { id: 'indeed',         label: '🔍 Indeed',             note: '⚠ Often blocked by anti-bot' },
   { id: 'mock',           label: '🤖 Mock',               note: 'Fake jobs — for testing only' },
 ]
+const SUPPORTED_PORTAL_IDS = new Set(PORTALS.map((portal) => portal.id))
 
 const BLANK: Partial<SearchConfig> = {
   keywords: [],
@@ -35,7 +36,10 @@ export default function SearchPage() {
   useEffect(() => {
     api.searchConfig.get()
       .then((c: SearchConfig) => {
-        setForm(c)
+        setForm({
+          ...c,
+          portals: (c.portals ?? []).filter((portal) => SUPPORTED_PORTAL_IDS.has(portal)),
+        })
         setKeywordsRaw(c.keywords?.join(', ') ?? '')
         setLocationsRaw(c.locations?.join(', ') ?? '')
       })
@@ -47,17 +51,21 @@ export default function SearchPage() {
     return raw.split(',').map((s) => s.trim()).filter(Boolean)
   }
 
+  function buildPayload() {
+    return {
+      ...form,
+      keywords: parseList(keywordsRaw),
+      locations: parseList(locationsRaw),
+      portals: (form.portals ?? []).filter((portal) => SUPPORTED_PORTAL_IDS.has(portal)),
+    }
+  }
+
   async function handleSave(e: FormEvent) {
     e.preventDefault()
     setSaving(true)
     setMsg(null)
     try {
-      const payload = {
-        ...form,
-        keywords:  parseList(keywordsRaw),
-        locations: parseList(locationsRaw),
-      }
-      await api.searchConfig.save(payload)
+      await api.searchConfig.save(buildPayload())
       setMsg({ ok: true, text: 'Search config saved ✓' })
     } catch (err: unknown) {
       setMsg({ ok: false, text: err instanceof Error ? err.message : 'Save failed' })
@@ -70,8 +78,9 @@ export default function SearchPage() {
     setRunning(true)
     setMsg(null)
     try {
+      await api.searchConfig.save(buildPayload())
       const res = await api.pipeline.run()
-      setMsg({ ok: true, text: res.message + ' — check Jobs page for results' })
+      setMsg({ ok: true, text: 'Search config saved and pipeline started — check Jobs page for results' })
     } catch (err: unknown) {
       setMsg({ ok: false, text: err instanceof Error ? err.message : 'Pipeline failed' })
     } finally {

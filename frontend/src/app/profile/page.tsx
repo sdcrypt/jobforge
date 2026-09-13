@@ -43,6 +43,7 @@ export default function ProfilePage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [targetRolesRaw, setTargetRolesRaw] = useState('')
 
   // Resume upload state
   const [uploading, setUploading] = useState(false)
@@ -59,6 +60,10 @@ export default function ProfilePage() {
   }, [])
 
   function applyProfile(p: Partial<UserProfile>) {
+    if (p.target_roles) {
+      setTargetRolesRaw(p.target_roles.join(', '))
+    }
+
     setForm((prev) => ({
       ...prev,
       full_name:         p.full_name         ?? prev.full_name,
@@ -83,7 +88,7 @@ export default function ProfilePage() {
   // ── Resume upload ──────────────────────────────────────────────────────────
   async function handleFile(file: File) {
     const ext = file.name.split('.').pop()?.toLowerCase()
-    if (!['pdf', 'docx', 'doc'].includes(ext ?? '')) {
+    if (!['pdf', 'docx'].includes(ext ?? '')) {
       setUploadMsg('⚠ Only PDF and DOCX files are supported.')
       return
     }
@@ -119,7 +124,10 @@ export default function ProfilePage() {
     setSaving(true)
     setMsg(null)
     try {
-      await api.profile.save(form)
+      await api.profile.save({
+        ...form,
+        target_roles: targetRolesRaw.split(',').map((s) => s.trim()).filter(Boolean),
+      })
       setMsg({ ok: true, text: 'Profile saved ✓' })
     } catch (err: unknown) {
       setMsg({ ok: false, text: err instanceof Error ? err.message : 'Save failed' })
@@ -213,7 +221,7 @@ export default function ProfilePage() {
           <input
             ref={fileRef}
             type="file"
-            accept=".pdf,.docx,.doc"
+            accept=".pdf,.docx"
             className="hidden"
             onChange={onFileInput}
           />
@@ -297,13 +305,8 @@ export default function ProfilePage() {
           <div className="grid grid-cols-2 gap-4">
             <Field label="Target Roles (comma separated)" className="col-span-2">
               <input className="input" placeholder="Senior Engineer, Tech Lead"
-                value={form.target_roles.join(', ')}
-                onChange={(e) =>
-                  setForm((f) => ({
-                    ...f,
-                    target_roles: e.target.value.split(',').map((s) => s.trim()).filter(Boolean),
-                  }))
-                }
+                value={targetRolesRaw}
+                onChange={(e) => setTargetRolesRaw(e.target.value)}
               />
             </Field>
             <Field label="Remote Preference">

@@ -3,8 +3,8 @@
 import useSWR from 'swr'
 import { api, Job } from '@/lib/api'
 
-// Fetch up to 200 jobs (dismissed ones are hidden in the jobs page filter)
-const fetcher = () => api.jobs.list({ limit: 200 }).then((r) => r.jobs)
+// Backend caps list responses at 100 jobs.
+const fetcher = () => api.jobs.list({ limit: 100 }).then((r) => r.jobs)
 
 export function useJobs() {
   const { data, error, isLoading, mutate } = useSWR<Job[]>('/api/jobs', fetcher, {

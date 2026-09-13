@@ -5,11 +5,20 @@ SearchConfig CRUD + pipeline trigger endpoints.
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from core.database import get_db
 from models.search_config import SearchConfig
 
 router = APIRouter(prefix="/api/search-config", tags=["search-config"])
+
+SUPPORTED_PORTALS = {
+    "linkedin",
+    "remoteok",
+    "weworkremotely",
+    "hackernews",
+    "indeed",
+    "mock",
+}
 
 
 class SearchConfigCreate(BaseModel):
@@ -20,6 +29,20 @@ class SearchConfigCreate(BaseModel):
     posted_within_days: int = 7
     active: bool = True
     run_every_hours: int = 12
+
+    @field_validator("portals")
+    @classmethod
+    def validate_portals(cls, portals: list[str]) -> list[str]:
+        unknown = sorted(set(portals) - SUPPORTED_PORTALS)
+        if unknown:
+            supported = ", ".join(sorted(SUPPORTED_PORTALS))
+            raise ValueError(
+                f"Unsupported portal(s): {', '.join(unknown)}. "
+                f"Supported portals: {supported}"
+            )
+        if not portals:
+            raise ValueError("Select at least one portal.")
+        return portals
 
 
 @router.post("", status_code=201)
