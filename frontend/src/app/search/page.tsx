@@ -18,6 +18,8 @@ const BLANK: Partial<SearchConfig> = {
   remote_only: false,
   posted_within_days: 7,
   run_every_hours: 12,
+  max_results_per_search: 15,
+  linkedin_pages: 1,
 }
 
 export default function SearchPage() {
@@ -211,6 +213,63 @@ export default function SearchPage() {
             />
             Remote jobs only
           </label>
+        </div>
+
+        {/* Search Depth */}
+        <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
+          <div>
+            <h2 className="font-semibold text-slate-700">Search Depth</h2>
+            <p className="text-xs text-slate-400 mt-0.5">
+              More results = more jobs found, but slower pipeline runs and slightly higher block risk on LinkedIn.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                Results per search
+                <span className="text-slate-400 font-normal"> (per keyword × location × portal)</span>
+              </label>
+              <input
+                type="number"
+                className="input"
+                min={5}
+                max={100}
+                step={5}
+                value={form.max_results_per_search ?? 15}
+                onChange={(e) => setForm((f) => ({ ...f, max_results_per_search: Number(e.target.value) }))}
+              />
+              <p className="text-xs text-slate-400 mt-1">Default 15 · safe up to ~50</p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1">
+                LinkedIn pages
+                <span className="text-slate-400 font-normal"> (each page ≈ 25 more jobs)</span>
+              </label>
+              <input
+                type="number"
+                className="input"
+                min={1}
+                max={4}
+                value={form.linkedin_pages ?? 1}
+                onChange={(e) => setForm((f) => ({ ...f, linkedin_pages: Number(e.target.value) }))}
+              />
+              <p className="text-xs text-slate-400 mt-1">Default 1 · max 4 before LinkedIn may block</p>
+            </div>
+          </div>
+          {/* Depth summary */}
+          {(() => {
+            const results = form.max_results_per_search ?? 15
+            const pages = form.linkedin_pages ?? 1
+            const kw = 1  // placeholder — actual keywords count not known here
+            const liMax = pages * 25
+            return (
+              <p className="text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
+                LinkedIn: up to <strong>{liMax}</strong> results per keyword+location
+                ({pages} page{pages !== 1 ? 's' : ''} × 25) ·
+                Other portals: up to <strong>{results}</strong> results each
+              </p>
+            )
+          })()}
         </div>
 
         {/* Last run info */}

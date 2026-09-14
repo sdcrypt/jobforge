@@ -74,6 +74,10 @@ export interface SearchConfig {
   posted_within_days: number
   active: boolean
   run_every_hours: number
+  /** Results fetched per keyword+location+portal combo (default 15, max 100) */
+  max_results_per_search: number
+  /** LinkedIn result pages per search (each page ≈ 25 jobs, default 1, max 4) */
+  linkedin_pages: number
   last_run_at: string | null
   last_run_found: number
 }

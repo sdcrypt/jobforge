@@ -27,6 +27,9 @@ class SearchConfigCreate(BaseModel):
     posted_within_days: int = 7
     active: bool = True
     run_every_hours: int = 12
+    # Search depth — configurable instead of hardcoded
+    max_results_per_search: int = 15   # results per keyword+location+portal combo
+    linkedin_pages: int = 1            # LinkedIn pagination pages (each page = 25 jobs)
 
     @field_validator("portals")
     @classmethod
@@ -41,6 +44,24 @@ class SearchConfigCreate(BaseModel):
         if not portals:
             raise ValueError("Select at least one portal.")
         return portals
+
+    @field_validator("max_results_per_search")
+    @classmethod
+    def validate_max_results(cls, v: int) -> int:
+        if v < 5:
+            raise ValueError("max_results_per_search must be at least 5")
+        if v > 100:
+            raise ValueError("max_results_per_search cannot exceed 100")
+        return v
+
+    @field_validator("linkedin_pages")
+    @classmethod
+    def validate_linkedin_pages(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("linkedin_pages must be at least 1")
+        if v > 4:
+            raise ValueError("linkedin_pages cannot exceed 4 (LinkedIn blocks aggressive pagination)")
+        return v
 
 
 @router.post("", status_code=201)

@@ -60,6 +60,8 @@ class SearchAgent(BaseAgent):
         portals: list[str],
         remote_only: bool = False,
         posted_within_days: int = 7,
+        max_results: int = 15,       # results per keyword+location+portal combo
+        linkedin_pages: int = 1,     # LinkedIn result pages (each page ≈ 25 jobs)
     ) -> list[dict]:
         # Filter out any unsupported portals silently
         active_portals = [p for p in portals if p in SUPPORTED_PORTALS]
@@ -70,7 +72,8 @@ class SearchAgent(BaseAgent):
         await self.emit(
             "started",
             f"Searching {len(active_portals)} portal(s) — "
-            f"{len(keywords)} keyword(s) × {len(locations)} location(s)…",
+            f"{len(keywords)} keyword(s) × {len(locations)} location(s) "
+            f"(up to {max_results} results each)…",
         )
 
         combos = [
@@ -87,7 +90,11 @@ class SearchAgent(BaseAgent):
         async def bounded(portal, keyword, location):
             async with sem:
                 await asyncio.sleep(random.uniform(0.4, 1.2))
-                return await self._search_one(portal, keyword, location, remote_only)
+                return await self._search_one(
+                    portal, keyword, location, remote_only,
+                    max_results=max_results,
+                    linkedin_pages=linkedin_pages,
+                )
 
         results = await asyncio.gather(
             *[bounded(p, k, l) for p, k, l in combos],
@@ -116,17 +123,24 @@ class SearchAgent(BaseAgent):
     # ── Portal dispatcher ─────────────────────────────────────────────────────
 
     async def _search_one(
-        self, portal: str, keyword: str, location: str, remote_only: bool
+        self,
+        portal: str,
+        keyword: str,
+        location: str,
+        remote_only: bool,
+        max_results: int = 15,
+        linkedin_pages: int = 1,
     ) -> list[dict]:
         try:
             if portal == "linkedin":
-                return await self._search_linkedin(keyword, location, remote_only)
+                return await self._search_linkedin(keyword, location, remote_only,
+                                                   max_results=max_results, pages=linkedin_pages)
             elif portal == "remoteok":
-                return await self._search_remoteok(keyword, location)
+                return await self._search_remoteok(keyword, location, max_results=max_results)
             elif portal == "weworkremotely":
-                return await self._search_weworkremotely(keyword)
+                return await self._search_weworkremotely(keyword, max_results=max_results)
             elif portal == "hackernews":
-                return await self._search_hackernews(keyword, remote_only)
+                return await self._search_hackernews(keyword, remote_only, max_results=max_results)
             else:
                 return []
         except Exception as e:
@@ -138,33 +152,55 @@ class SearchAgent(BaseAgent):
     # ═══════════════════════════════════════════════════════════════════════════
 
     async def _search_linkedin(
-        self, keyword: str, location: str, remote_only: bool
+        self, keyword: str, location: str, remote_only: bool,
+        max_results: int = 15, pages: int = 1,
     ) -> list[dict]:
-        params = {
+        """
+        LinkedIn guest API — paginates through `pages` result pages.
+        Each page returns up to 25 cards. Total collected is capped at max_results.
+        """
+        base_params: dict[str, str] = {
             "keywords": keyword,
             "location": location,
-            "f_TPR": "r604800",  # last 7 days
-            "start": "0",
+            "f_TPR":    "r604800",   # last 7 days
         }
         if remote_only:
-            params["f_WT"] = "2"
+            base_params["f_WT"] = "2"
 
-        raw = await self._fetch(
-            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search",
-            params=params,
-        )
-        if not raw:
-            return []
+        jobs: list[dict] = []
+        page_size = 25   # LinkedIn's guest API page size
 
-        soup = BeautifulSoup(raw, "html.parser")
-        cards = soup.find_all("li")
-        log.info("search.linkedin", keyword=keyword, cards=len(cards))
+        for page_num in range(pages):
+            if len(jobs) >= max_results:
+                break
 
-        jobs = []
-        for card in cards[:15]:
-            job = self._parse_linkedin_card(card, keyword)
-            if job:
-                jobs.append(job)
+            params = {**base_params, "start": str(page_num * page_size)}
+            raw = await self._fetch(
+                "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search",
+                params=params,
+            )
+            if not raw:
+                break
+
+            soup = BeautifulSoup(raw, "html.parser")
+            cards = soup.find_all("li")
+            log.info("search.linkedin", keyword=keyword, location=location,
+                     page=page_num + 1, cards=len(cards))
+
+            if not cards:
+                break   # no more results — stop paging
+
+            for card in cards:
+                if len(jobs) >= max_results:
+                    break
+                job = self._parse_linkedin_card(card, keyword)
+                if job:
+                    jobs.append(job)
+
+            # Polite delay between pages
+            if page_num < pages - 1:
+                await asyncio.sleep(random.uniform(1.0, 2.0))
+
         return jobs
 
     def _parse_linkedin_card(self, card, keyword: str) -> dict | None:
@@ -198,7 +234,7 @@ class SearchAgent(BaseAgent):
     # PORTAL: RemoteOK  — free public JSON API, no auth
     # ═══════════════════════════════════════════════════════════════════════════
 
-    async def _search_remoteok(self, keyword: str, location: str) -> list[dict]:
+    async def _search_remoteok(self, keyword: str, location: str, max_results: int = 15) -> list[dict]:
         try:
             async with httpx.AsyncClient(
                 timeout=20,
@@ -250,7 +286,7 @@ class SearchAgent(BaseAgent):
                 "status":      "new",
             })
 
-            if len(jobs) >= 15:
+            if len(jobs) >= max_results:
                 break
 
         log.info("search.remoteok", keyword=keyword, matched=len(jobs))
@@ -266,7 +302,7 @@ class SearchAgent(BaseAgent):
         "https://weworkremotely.com/categories/remote-management-and-finance-jobs.rss",
     ]
 
-    async def _search_weworkremotely(self, keyword: str) -> list[dict]:
+    async def _search_weworkremotely(self, keyword: str, max_results: int = 15) -> list[dict]:
         kw_words = keyword.lower().split()
         jobs: list[dict] = []
         seen: set[str] = set()
@@ -316,9 +352,9 @@ class SearchAgent(BaseAgent):
                     "status":   "new",
                 })
 
-                if len(jobs) >= 15:
+                if len(jobs) >= max_results:
                     break
-            if len(jobs) >= 15:
+            if len(jobs) >= max_results:
                 break
 
         log.info("search.weworkremotely", keyword=keyword, matched=len(jobs))
@@ -328,7 +364,7 @@ class SearchAgent(BaseAgent):
     # PORTAL: HackerNews "Who is Hiring"  — Algolia search API, no auth
     # ═══════════════════════════════════════════════════════════════════════════
 
-    async def _search_hackernews(self, keyword: str, remote_only: bool) -> list[dict]:
+    async def _search_hackernews(self, keyword: str, remote_only: bool, max_results: int = 15) -> list[dict]:
         try:
             async with httpx.AsyncClient(timeout=15) as client:
 
@@ -353,7 +389,7 @@ class SearchAgent(BaseAgent):
                     params={
                         "tags":         f"comment,story_{story_id}",
                         "query":        query,
-                        "hitsPerPage":  20,
+                        "hitsPerPage":  max(max_results, 20),  # fetch at least 20, respect config
                     },
                 )
                 if r2.status_code != 200:

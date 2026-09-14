@@ -63,6 +63,8 @@ async def run_pipeline(db: AsyncSession) -> dict:
         portals=config.portals,
         remote_only=config.remote_only,
         posted_within_days=config.posted_within_days,
+        max_results=getattr(config, "max_results_per_search", 15),
+        linkedin_pages=getattr(config, "linkedin_pages", 1),
     )
 
     # ── Step 2: Store (deduplicate) ───────────────────────────────────────

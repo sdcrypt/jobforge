@@ -46,9 +46,13 @@ async def init_db():
             else "DATETIME"
         )
         _new_columns = [
-            ("jobs", "fit_summary", "TEXT"),
-            ("jobs", "talking_points", json_type),
-            ("jobs", "researched_at", datetime_type),
+            # jobs — Phase 5 Research Agent fields
+            ("jobs",           "fit_summary",           "TEXT"),
+            ("jobs",           "talking_points",        json_type),
+            ("jobs",           "researched_at",         datetime_type),
+            # search_configs — configurable search depth
+            ("search_configs", "max_results_per_search", "INTEGER DEFAULT 15"),
+            ("search_configs", "linkedin_pages",          "INTEGER DEFAULT 1"),
         ]
         for table, col, col_type in _new_columns:
             await conn.execute(
