@@ -124,11 +124,6 @@ All agents emit real-time events to the frontend via WebSocket — you watch the
 | — | 4 working portals (LinkedIn, RemoteOK, WWR, HackerNews) | ✅ Done |
 | — | Configurable search depth (results per search, LinkedIn pages) | ✅ Done |
 | — | Job dismiss, clear, status tracking | ✅ Done |
-| 6A | Apply Assist — tailored apply package per job | 🔲 Planned |
-| 6B | Application status Kanban board | 🔲 Planned |
-| 6C | Google Careers + Amazon Jobs portals | 🔲 Planned |
-| 6D | Auto-scheduler + email notifications | 🔲 Planned |
-| 6E | Dashboard — stats, pipeline history, funnel | 🔲 Planned |
 
 ---
 
