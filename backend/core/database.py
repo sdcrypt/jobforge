@@ -50,9 +50,10 @@ async def init_db():
             ("jobs",           "fit_summary",           "TEXT"),
             ("jobs",           "talking_points",        json_type),
             ("jobs",           "researched_at",         datetime_type),
-            # search_configs — configurable search depth
+            # search_configs — configurable search depth + auto-research
             ("search_configs", "max_results_per_search", "INTEGER DEFAULT 15"),
             ("search_configs", "linkedin_pages",          "INTEGER DEFAULT 1"),
+            ("search_configs", "auto_research_top_n",     "INTEGER DEFAULT 5"),
         ]
         for table, col, col_type in _new_columns:
             await conn.execute(

@@ -37,6 +37,8 @@ class SearchConfig(Base):
     max_results_per_search: Mapped[int] = mapped_column(Integer, default=15)
     # LinkedIn paginates in pages of 25; 1 page = up to 25 jobs, 2 pages = up to 50 etc.
     linkedin_pages: Mapped[int] = mapped_column(Integer, default=1)
+    # Auto-research top N jobs by fit_score after each pipeline run (0 = disabled)
+    auto_research_top_n: Mapped[int] = mapped_column(Integer, default=5)
 
     # Schedule
     active: Mapped[bool] = mapped_column(Boolean, default=True)

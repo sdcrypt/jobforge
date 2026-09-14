@@ -78,6 +78,8 @@ export interface SearchConfig {
   max_results_per_search: number
   /** LinkedIn result pages per search (each page ≈ 25 jobs, default 1, max 4) */
   linkedin_pages: number
+  /** Auto-research top N jobs by fit score after each pipeline run (0 = disabled) */
+  auto_research_top_n: number
   last_run_at: string | null
   last_run_found: number
 }

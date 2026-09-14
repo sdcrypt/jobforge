@@ -30,6 +30,8 @@ class SearchConfigCreate(BaseModel):
     # Search depth — configurable instead of hardcoded
     max_results_per_search: int = 15   # results per keyword+location+portal combo
     linkedin_pages: int = 1            # LinkedIn pagination pages (each page = 25 jobs)
+    # Auto-research: 0 = disabled, N = research top N jobs by score after each run
+    auto_research_top_n: int = 5
 
     @field_validator("portals")
     @classmethod
@@ -61,6 +63,15 @@ class SearchConfigCreate(BaseModel):
             raise ValueError("linkedin_pages must be at least 1")
         if v > 4:
             raise ValueError("linkedin_pages cannot exceed 4 (LinkedIn blocks aggressive pagination)")
+        return v
+
+    @field_validator("auto_research_top_n")
+    @classmethod
+    def validate_auto_research(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("auto_research_top_n cannot be negative (use 0 to disable)")
+        if v > 50:
+            raise ValueError("auto_research_top_n cannot exceed 50")
         return v
 
 

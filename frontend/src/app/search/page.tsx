@@ -20,6 +20,7 @@ const BLANK: Partial<SearchConfig> = {
   run_every_hours: 12,
   max_results_per_search: 15,
   linkedin_pages: 1,
+  auto_research_top_n: 5,
 }
 
 export default function SearchPage() {
@@ -260,7 +261,6 @@ export default function SearchPage() {
           {(() => {
             const results = form.max_results_per_search ?? 15
             const pages = form.linkedin_pages ?? 1
-            const kw = 1  // placeholder — actual keywords count not known here
             const liMax = pages * 25
             return (
               <p className="text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2">
@@ -270,6 +270,42 @@ export default function SearchPage() {
               </p>
             )
           })()}
+
+          {/* Auto-research */}
+          <div className="border-t border-slate-100 pt-4 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xs font-medium text-slate-700">Auto-research after pipeline</p>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  AI analyses top N jobs automatically — results appear progressively in the background.
+                  Set to 0 to disable.
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0 ml-4">
+                <input
+                  type="number"
+                  className="input w-20 text-center"
+                  min={0}
+                  max={50}
+                  value={form.auto_research_top_n ?? 5}
+                  onChange={(e) => setForm((f) => ({ ...f, auto_research_top_n: Number(e.target.value) }))}
+                />
+                <span className="text-xs text-slate-500">jobs</span>
+              </div>
+            </div>
+            {(form.auto_research_top_n ?? 5) > 0 && (
+              <p className="text-xs text-slate-400 bg-brand-50 text-brand-700 rounded-lg px-3 py-2">
+                ✓ After each pipeline run, top <strong>{form.auto_research_top_n ?? 5}</strong> jobs
+                (by fit score) will be auto-researched in the background (~
+                {Math.ceil((form.auto_research_top_n ?? 5) / 2) * 15}s after pipeline finishes).
+              </p>
+            )}
+            {(form.auto_research_top_n ?? 5) === 0 && (
+              <p className="text-xs text-slate-400">
+                Auto-research disabled — use the 🔍 Research button on individual job cards.
+              </p>
+            )}
+          </div>
         </div>
 
         {/* Last run info */}

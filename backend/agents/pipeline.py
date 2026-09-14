@@ -1,11 +1,12 @@
 """
 JobForge — Pipeline
-Chains Search → Store → Rank in one call.
+Chains Search → Store → Rank → (optional) Auto-Research in one background run.
 Used by the API route and the Celery scheduled task.
 """
 
+import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, desc
 import structlog
 
 from models.job import Job
@@ -151,4 +152,81 @@ async def run_pipeline(db: AsyncSession) -> dict:
         summary,
     )
 
+    # ── Step 4: Auto-research top N ───────────────────────────────────────
+    # Runs *after* the "done" event so the UI already shows all jobs.
+    # Research fills in progressively — the frontend auto-refreshes every 10s.
+    auto_n = getattr(config, "auto_research_top_n", 5)
+    if auto_n > 0 and profile:
+        await _auto_research(profile, auto_n)
+
     return summary
+
+
+async def _auto_research(profile, top_n: int) -> None:
+    """
+    Background step: research the top N unresearched jobs by fit_score.
+    Runs 2 jobs concurrently to keep Ollama load manageable.
+    Uses fresh DB sessions per job to avoid long-held transactions.
+    """
+    from core.database import AsyncSessionLocal
+    from agents.research import ResearchAgent
+
+    # Build profile dict once
+    profile_dict = {
+        "full_name":         profile.full_name,
+        "headline":          profile.headline,
+        "summary":           profile.summary,
+        "skills":            profile.skills or [],
+        "experience":        profile.experience or [],
+        "education":         profile.education or [],
+        "target_roles":      profile.target_roles or [],
+        "remote_preference": profile.remote_preference,
+    }
+
+    # Find top N jobs that haven't been researched yet, ordered by fit_score
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Job)
+            .where(Job.researched_at == None)   # noqa: E711
+            .where(Job.status != "dismissed")
+            .order_by(desc(Job.fit_score))
+            .limit(top_n)
+        )
+        jobs_to_research = result.scalars().all()
+        job_ids = [j.id for j in jobs_to_research]
+
+    if not job_ids:
+        return
+
+    await ws_manager.emit_agent_event(
+        "research", "started",
+        f"Auto-researching top {len(job_ids)} jobs in the background…",
+        {"total": len(job_ids)},
+    )
+
+    sem = asyncio.Semaphore(2)   # 2 concurrent — keeps Ollama comfortable
+    completed = 0
+
+    async def research_one(job_id: str) -> None:
+        nonlocal completed
+        async with sem:
+            try:
+                async with AsyncSessionLocal() as research_db:
+                    agent = ResearchAgent(db=research_db, job_id=job_id)
+                    await agent.run(job_id=job_id, profile=profile_dict)
+                completed += 1
+                await ws_manager.emit_agent_event(
+                    "research", "thinking",
+                    f"Researched {completed}/{len(job_ids)} jobs…",
+                    {"completed": completed, "total": len(job_ids)},
+                )
+            except Exception as e:
+                log.warning("pipeline.auto_research_failed", job_id=job_id, error=str(e))
+
+    await asyncio.gather(*[research_one(jid) for jid in job_ids], return_exceptions=True)
+
+    await ws_manager.emit_agent_event(
+        "research", "done",
+        f"Auto-research complete — {completed}/{len(job_ids)} jobs analysed.",
+        {"completed": completed, "total": len(job_ids)},
+    )
