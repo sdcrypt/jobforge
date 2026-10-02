@@ -147,9 +147,10 @@ export default function JobCard({ job, onRefresh }: Props) {
   // Local copy of research data — updated optimistically after API call
   const [localJob, setLocalJob] = useState<Job>(job)
 
-  // Keep localJob in sync when SWR refreshes the parent
-  // (only update fields not overwritten by research)
-  if (localJob.id !== job.id) setLocalJob(job)
+  // Keep localJob in sync when SWR refreshes after auto-research.
+  useEffect(() => {
+    setLocalJob(job)
+  }, [job])
 
   const fitPct = scorePercent(localJob.fit_score)
   const hasResearch = !!localJob.researched_at

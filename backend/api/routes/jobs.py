@@ -118,7 +118,7 @@ async def list_jobs(
     if min_score > 0:
         q = q.where(Job.fit_score >= min_score)
 
-    q = q.order_by(desc(Job.fit_score)).limit(limit).offset(offset)
+    q = q.order_by(desc(Job.fit_score).nulls_last(), Job.found_at.desc()).limit(limit).offset(offset)
     result = await db.execute(q)
     jobs = result.scalars().all()
     return {"jobs": jobs, "count": len(jobs)}

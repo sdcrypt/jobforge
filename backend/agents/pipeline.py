@@ -5,10 +5,12 @@ Used by the API route and the Celery scheduled task.
 """
 
 import asyncio
+from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+from sqlalchemy import and_, delete, desc, func, or_, select
 import structlog
 
+from models.application import Application
 from models.job import Job
 from models.profile import UserProfile
 from models.search_config import SearchConfig
@@ -56,6 +58,10 @@ async def run_pipeline(db: AsyncSession) -> dict:
         )
         return {"error": "No profile found"}
 
+    # Remove stale local rows before adding fresh results. Search agents already
+    # request recent postings, but old rows can remain from earlier runs.
+    cleaned_count = await _cleanup_stale_jobs(db, config.posted_within_days)
+
     # ── Step 1: Search ────────────────────────────────────────────────────
     search_agent = SearchAgent(db=db)
     raw_jobs = await search_agent.run(
@@ -72,7 +78,6 @@ async def run_pipeline(db: AsyncSession) -> dict:
     # Primary dedup: exact URL match (DB unique constraint)
     # Secondary dedup: same company + same title (catches URL variants / LinkedIn
     #   returning the same job for different keyword/location combos)
-    from sqlalchemy import and_, func
     new_count = 0
     for j in raw_jobs:
         url = j.get("url", "")
@@ -142,13 +147,14 @@ async def run_pipeline(db: AsyncSession) -> dict:
     summary = {
         "new_jobs_found": new_count,
         "jobs_ranked": ranked_count,
+        "old_jobs_removed": cleaned_count,
         "portals_searched": config.portals,
         "keywords": config.keywords,
     }
 
     await ws_manager.emit_agent_event(
         "pipeline", "done",
-        f"Pipeline complete — {new_count} new jobs, {ranked_count} ranked.",
+        f"Pipeline complete — {new_count} new jobs, {ranked_count} ranked, {cleaned_count} old removed.",
         summary,
     )
 
@@ -160,6 +166,65 @@ async def run_pipeline(db: AsyncSession) -> dict:
         await _auto_research(profile, auto_n)
 
     return summary
+
+
+async def _cleanup_stale_jobs(db: AsyncSession, posted_within_days: int) -> int:
+    """
+    Delete jobs that are older than the active search window.
+
+    Uses posted_at when a portal provides it. For feeds/APIs that do not expose a
+    reliable posting date, found_at is used as a fallback so stale local rows do
+    not stay forever.
+    """
+    days = max(1, posted_within_days or 7)
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    protected_job_statuses = {
+        "saved",
+        "applying",
+        "applied",
+        "interviewing",
+        "offered",
+        "rejected",
+    }
+    protected_application_statuses = {
+        "applied",
+        "screening",
+        "interviewing",
+        "offer",
+        "accepted",
+        "rejected",
+    }
+
+    protected_application_job_ids = select(Application.job_id).where(
+        Application.status.in_(protected_application_statuses)
+    )
+
+    stale_job_ids = select(Job.id).where(
+        or_(
+            Job.posted_at < cutoff,
+            and_(Job.posted_at == None, Job.found_at < cutoff),  # noqa: E711
+        ),
+        Job.status.notin_(protected_job_statuses),
+        Job.id.notin_(protected_application_job_ids),
+    )
+
+    stale_ids = [row[0] for row in (await db.execute(stale_job_ids)).all()]
+    if not stale_ids:
+        return 0
+
+    await db.execute(delete(Application).where(Application.job_id.in_(stale_ids)))
+    result = await db.execute(delete(Job).where(Job.id.in_(stale_ids)))
+    await db.flush()
+
+    removed = result.rowcount or 0
+    await ws_manager.emit_agent_event(
+        "pipeline",
+        "thinking",
+        f"Removed {removed} stale jobs older than {days} days.",
+        {"removed": removed, "posted_within_days": days},
+    )
+    return removed
 
 
 async def _auto_research(profile, top_n: int) -> None:
