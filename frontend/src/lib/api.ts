@@ -175,6 +175,7 @@ export const api = {
   // ── Applications ─────────────────────────────────────────────────────────
   applications: {
     list: () => req<{ applications: Application[]; count: number }>('/api/applications'),
+    get: (jobId: string) => req<Application>(`/api/applications/${jobId}`),
     generateDocs: (jobId: string) =>
       req<{ message: string; application_id: string }>(`/api/applications/${jobId}/generate-docs`, {
         method: 'POST',

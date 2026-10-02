@@ -1,7 +1,7 @@
 # 🔨 JobForge
 
 > **Forge your next career move.**  
-> Local AI-powered job search, fit analysis, and document generation — runs entirely on your Mac. No cloud, no paid APIs, no subscriptions.
+> Local-first AI-powered job search, fit analysis, and document generation — runs on your Mac with Ollama by default.
 
 ---
 
@@ -13,7 +13,7 @@ JobForge automates the repetitive parts of job hunting:
 2. **Scores** every job against your profile (fit score 0–100) with sub-scores for tech, experience, location, and growth
 3. **Deep-analyses** top jobs with AI — strengths, gaps, and talking points tailored to each role
 4. **Generates** a professional one-pager CV + cover letter as PDF, tailored per job
-5. **Tracks** everything locally — no data leaves your machine
+5. **Tracks** your profile, jobs, and generated documents in your local database
 
 ---
 
@@ -28,10 +28,12 @@ Your Mac
     ├── frontend  :3000        ← Next.js 15 UI
     ├── backend   :8000        ← FastAPI + WebSocket agent feed
     ├── postgres  :5432        ← Job store, profile, config
-    └── redis     :6379        ← Celery task queue
+    ├── redis     :6379        ← Celery broker/result backend
+    ├── worker                  ← Celery worker for pipeline jobs
+    └── beat                    ← Celery beat for scheduled runs
 ```
 
-Everything talks to Ollama at `host.docker.internal:11434` — the LLM never leaves your machine.
+Containers talk to Ollama at `host.docker.internal:11434`. With the default Ollama config, LLM calls stay on your Mac. External job portals are still queried during scraping, and profile/job text may leave your machine if you switch to a cloud LLM provider.
 
 ---
 
@@ -103,7 +105,7 @@ All agents emit real-time events to the frontend via WebSocket — you watch the
 | Frontend | Next.js 15, TypeScript, Tailwind CSS, SWR |
 | Backend | FastAPI (async), SQLAlchemy 2.0, Pydantic v2 |
 | LLM | Ollama (local) — swap to OpenAI/Groq via `.env` |
-| Database | SQLite (dev) / PostgreSQL (prod) |
+| Database | PostgreSQL via Docker Compose; SQLite only for optional direct backend dev |
 | Task Queue | Celery + Redis |
 | PDF | WeasyPrint + Jinja2 templates |
 | Resume Parse | pypdf (PDF), python-docx (DOCX) |
@@ -159,7 +161,7 @@ Quick start (after Ollama is running with models pulled):
 
 ```bash
 cd jobforge
-docker compose up --build
+docker compose up -d --build
 ```
 
 Then open:
@@ -182,7 +184,7 @@ Then open:
 
 ## Design Decisions
 
-- **Local only** — Ollama on host Mac, all data in local Docker volumes. Nothing goes to the cloud.
+- **Local-first** — Ollama on host Mac, profile/jobs/docs in local Docker volumes. Scraping still contacts external job sites, and cloud LLM providers can be used by changing `.env`.
 - **Single user** — designed for personal use. No auth, no multi-tenancy.
 - **No system installs** — all Python dependencies run inside Docker. Only Ollama is installed on the host (for Metal GPU access).
 - **Provider-agnostic LLM** — same `openai` SDK throughout. Swap providers by changing `.env`.

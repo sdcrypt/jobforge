@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Job, api } from '@/lib/api'
 import clsx from 'clsx'
 
@@ -138,6 +138,7 @@ function ResearchPanel({ job, onClose }: ResearchPanelProps) {
 export default function JobCard({ job, onRefresh }: Props) {
   const [generating, setGenerating]   = useState(false)
   const [tailoring, setTailoring]     = useState(false)
+  const [docsReady, setDocsReady]     = useState(false)
   const [dismissing, setDismissing]   = useState(false)
   const [researching, setResearching] = useState(false)
   const [showPanel, setShowPanel]     = useState(false)
@@ -153,13 +154,31 @@ export default function JobCard({ job, onRefresh }: Props) {
   const fitPct = scorePercent(localJob.fit_score)
   const hasResearch = !!localJob.researched_at
 
+  useEffect(() => {
+    let cancelled = false
+    api.applications.get(localJob.id)
+      .then((app) => {
+        if (!cancelled && app.status === 'ready' && app.one_pager_path) {
+          setDocsReady(true)
+        }
+      })
+      .catch(() => {
+        // No application exists yet for this job.
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [localJob.id])
+
   // ── Actions ──────────────────────────────────────────────────────────────
 
   async function generateDocs() {
     setGenerating(true)
+    setDocsReady(false)
     setError(null)
     try {
       await api.applications.generateDocs(localJob.id)
+      await waitForDocs()
       onRefresh?.()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to generate docs')
@@ -170,15 +189,33 @@ export default function JobCard({ job, onRefresh }: Props) {
 
   async function tailorDocs() {
     setTailoring(true)
+    setDocsReady(false)
     setError(null)
     try {
       await api.applications.tailorAndGenerate(localJob.id)
+      await waitForDocs()
       onRefresh?.()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Tailoring failed — is Ollama running?')
     } finally {
       setTailoring(false)
     }
+  }
+
+  async function waitForDocs() {
+    for (let i = 0; i < 90; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+      const app = await api.applications.get(localJob.id).catch(() => null)
+      if (!app) continue
+      if (app.status === 'ready' && app.one_pager_path) {
+        setDocsReady(true)
+        return
+      }
+      if (app.status === 'failed') {
+        throw new Error('Document generation failed. Check backend logs for the DocGen error.')
+      }
+    }
+    throw new Error('Document generation is still running. Check the Agent Feed or try Preview again in a minute.')
   }
 
   async function dismiss() {
@@ -339,12 +376,43 @@ export default function JobCard({ job, onRefresh }: Props) {
           </button>
         )}
 
-        <a
-          href={api.applications.downloadOnePager(localJob.id)}
-          className="text-xs px-3 py-1.5 rounded-lg border border-brand-200 text-brand-600 hover:bg-brand-50 transition-colors"
-        >
-          ↓ PDF
-        </a>
+        {(docsReady || generating || tailoring) && (
+          <a
+            href={api.applications.previewOnePager(localJob.id)}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-disabled={!docsReady}
+            onClick={(e) => {
+              if (!docsReady) e.preventDefault()
+            }}
+            className={clsx(
+              'text-xs px-3 py-1.5 rounded-lg border transition-colors',
+              docsReady
+                ? 'border-brand-200 text-brand-600 hover:bg-brand-50'
+                : 'border-slate-200 text-slate-300 pointer-events-none',
+            )}
+          >
+            Preview
+          </a>
+        )}
+
+        {(docsReady || generating || tailoring) && (
+          <a
+            href={api.applications.downloadOnePager(localJob.id)}
+            aria-disabled={!docsReady}
+            onClick={(e) => {
+              if (!docsReady) e.preventDefault()
+            }}
+            className={clsx(
+              'text-xs px-3 py-1.5 rounded-lg border transition-colors',
+              docsReady
+                ? 'border-brand-200 text-brand-600 hover:bg-brand-50'
+                : 'border-slate-200 text-slate-300 pointer-events-none',
+            )}
+          >
+            ↓ PDF
+          </a>
+        )}
 
         <button
           onClick={dismiss}

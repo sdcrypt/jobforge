@@ -10,8 +10,10 @@ Your Mac (host)
 └── Docker Desktop
     ├── frontend   :3000       ← Next.js 15 UI
     ├── backend    :8000       ← FastAPI + agents + WebSocket
-    ├── postgres   :5432       ← SQLite in dev, Postgres in prod
-    └── redis      :6379       ← Celery task queue
+    ├── postgres   :5432       ← PostgreSQL 16 database
+    ├── redis      :6379       ← Celery broker/result backend
+    ├── worker                 ← Celery worker for pipeline jobs
+    └── beat                   ← Celery beat for scheduled runs
 ```
 
 **Nothing is installed on your system Python.** Ollama runs on the host for Metal GPU acceleration. Everything else is in Docker.
@@ -51,6 +53,16 @@ Download from: https://ollama.com/download/mac
 ollama serve
 ```
 
+If your shell says `zsh: command not found: ollama` after a Homebrew install on Apple Silicon, use the Homebrew path directly:
+```bash
+/opt/homebrew/bin/ollama serve
+```
+
+Or add Homebrew to your shell:
+```bash
+eval "$(/opt/homebrew/bin/brew shellenv)"
+```
+
 **Pull the two models** (one-time download, ~7 GB total):
 ```bash
 # Open a new terminal tab while `ollama serve` is running
@@ -75,7 +87,7 @@ ollama list
 ## Step 3 — Clone the repo
 
 ```bash
-cd ~/Documents/Python
+cd ~/Documents/Projects
 git clone <your-repo-url> jobforge
 cd jobforge
 ```
@@ -99,6 +111,9 @@ DATABASE_URL=sqlite+aiosqlite:///./jobforge.db
 ```
 
 > `host.docker.internal` is the Docker magic hostname that lets containers reach Ollama running on your Mac host.
+>
+> Docker Compose overrides `DATABASE_URL` and Redis settings for containers. The local Docker setup uses PostgreSQL:
+> `postgresql+asyncpg://jobforge:jobforge@postgres:5432/jobforge`.
 
 ---
 
@@ -106,7 +121,7 @@ DATABASE_URL=sqlite+aiosqlite:///./jobforge.db
 
 ```bash
 # From the jobforge/ root (where docker-compose.yml lives)
-docker compose up --build
+docker compose up -d --build
 ```
 
 First build takes 3–8 minutes (downloads images, installs Python deps, builds Next.js).  
@@ -114,10 +129,21 @@ Subsequent starts take ~15 seconds.
 
 You should see:
 ```
-jobforge-backend-1   | INFO: JobForge startup complete
-jobforge-backend-1   | INFO: DB tables ready
-jobforge-backend-1   | INFO: Uvicorn running on http://0.0.0.0:8000
-jobforge-frontend-1  | ✓ Ready in 2.1s on http://0.0.0.0:3000
+jobforge_backend   | INFO: JobForge startup complete
+jobforge_backend   | INFO: DB tables ready
+jobforge_backend   | INFO: Uvicorn running on http://0.0.0.0:8000
+jobforge_frontend  | ✓ Ready in 2.1s on http://0.0.0.0:3000
+```
+
+Expected containers:
+```bash
+docker compose ps
+# jobforge_backend
+# jobforge_frontend
+# jobforge_postgres
+# jobforge_redis
+# jobforge_worker
+# jobforge_beat
 ```
 
 ---
@@ -137,6 +163,15 @@ curl http://localhost:8000/health/llm
 **Open the app:**
 - **UI** → http://localhost:3000
 - **API docs** (Swagger) → http://localhost:8000/docs
+
+**Postico 2 connection:**
+```text
+Host: localhost
+Port: 5432
+Database: jobforge
+User: jobforge
+Password: jobforge
+```
 
 ---
 
@@ -158,6 +193,13 @@ Go to **Search Config** (🔍) and fill in:
 - **Auto-research** — how many top jobs to AI-analyse after each run (default 5)
 
 Click **Save Config**.
+
+Supported portals are currently:
+```text
+linkedin, remoteok, weworkremotely, hackernews
+```
+
+Naukri, Indeed, and Glassdoor are not enabled because their anti-bot/recaptcha behavior makes simple local scraping unreliable. Naukri should be handled later with a dedicated scraper.
 
 ### 3. Run the pipeline
 Click **🚀 Run Now** — or go to the **Jobs** page and click **Run Pipeline**.
@@ -207,7 +249,7 @@ docker compose logs -f backend
 docker compose logs -f frontend
 
 # Rebuild after changing requirements.txt or Dockerfile
-docker compose up --build
+docker compose up -d --build
 
 # Open a shell inside the backend container
 docker compose exec backend bash
@@ -228,6 +270,11 @@ ollama serve
 curl http://localhost:11434/api/tags
 ```
 
+If `ollama` is not found:
+```bash
+/opt/homebrew/bin/ollama serve
+```
+
 ### Jobs page shows nothing after pipeline
 Check the backend logs for errors:
 ```bash
@@ -238,6 +285,17 @@ Common causes:
 - No profile saved → go to Profile page first
 - No search config → go to Search Config and save
 - Keywords too specific → try broader terms
+- A stale database schema after code changes
+
+If backend logs mention missing columns such as `jobs.fit_summary`, `jobs.talking_points`, or `jobs.researched_at`, restart the backend first:
+```bash
+docker compose restart backend
+```
+
+If the error continues, add the missing columns manually:
+```bash
+docker compose exec postgres psql -U jobforge -d jobforge -c "ALTER TABLE jobs ADD COLUMN IF NOT EXISTS fit_summary TEXT; ALTER TABLE jobs ADD COLUMN IF NOT EXISTS talking_points JSONB; ALTER TABLE jobs ADD COLUMN IF NOT EXISTS researched_at TIMESTAMP WITHOUT TIME ZONE;"
+```
 
 ### Frontend not loading
 ```bash

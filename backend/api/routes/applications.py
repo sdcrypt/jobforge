@@ -30,6 +30,12 @@ async def generate_docs(
     await _get_job(job_id, db)
     await _get_profile(db)
     app = await _get_or_create_application(job_id, db)
+    app.status = "generating"
+    app.one_pager_path = None
+    app.cover_letter_path = None
+    app.one_pager_html = None
+    app.cover_letter_text = None
+    await db.commit()
 
     background_tasks.add_task(_run_docgen, job_id)
     return {
@@ -43,19 +49,27 @@ async def _run_docgen(job_id: str):
     from core.database import AsyncSessionLocal
     from agents.docgen import DocGenAgent
     async with AsyncSessionLocal() as db:
-        job = await _get_job(job_id, db)
-        profile = await _get_profile(db)
-        app = await _get_or_create_application(job_id, db)
+        app = None
+        try:
+            job = await _get_job(job_id, db)
+            profile = await _get_profile(db)
+            app = await _get_or_create_application(job_id, db)
 
-        agent = DocGenAgent(db=db, job_id=job_id)
-        result = await agent.run(job=job, profile=profile)
+            agent = DocGenAgent(db=db, job_id=job_id)
+            result = await agent.run(job=job, profile=profile)
 
-        app.one_pager_path = result["one_pager_path"]
-        app.one_pager_html = result["one_pager_html"]
-        app.cover_letter_path = result["cover_letter_path"]
-        app.cover_letter_text = result["cover_letter_text"]
-        app.status = "ready"
-        await db.commit()
+            app.one_pager_path = result["one_pager_path"]
+            app.one_pager_html = result["one_pager_html"]
+            app.cover_letter_path = result["cover_letter_path"]
+            app.cover_letter_text = result["cover_letter_text"]
+            app.status = "ready"
+        except Exception as exc:
+            if app is None:
+                app = await _get_or_create_application(job_id, db)
+            app.status = "failed"
+            raise exc
+        finally:
+            await db.commit()
 
 
 # ── Tailor + generate (research-informed) ────────────────────────────────────
@@ -79,6 +93,12 @@ async def tailor_and_generate(
         )
     await _get_profile(db)
     app = await _get_or_create_application(job_id, db)
+    app.status = "generating"
+    app.one_pager_path = None
+    app.cover_letter_path = None
+    app.one_pager_html = None
+    app.cover_letter_text = None
+    await db.commit()
 
     background_tasks.add_task(_run_tailored_docgen, job_id)
     return {
@@ -92,27 +112,35 @@ async def _run_tailored_docgen(job_id: str):
     from core.database import AsyncSessionLocal
     from agents.docgen import DocGenAgent
     async with AsyncSessionLocal() as db:
-        job = await _get_job(job_id, db)
-        profile = await _get_profile(db)
-        app = await _get_or_create_application(job_id, db)
+        app = None
+        try:
+            job = await _get_job(job_id, db)
+            profile = await _get_profile(db)
+            app = await _get_or_create_application(job_id, db)
 
-        research_context = {
-            "fit_score":      job.fit_score,
-            "strengths":      job.strengths,
-            "gaps":           job.gaps,
-            "talking_points": job.talking_points,
-            "fit_summary":    job.fit_summary,
-        }
+            research_context = {
+                "fit_score":      job.fit_score,
+                "strengths":      job.strengths,
+                "gaps":           job.gaps,
+                "talking_points": job.talking_points,
+                "fit_summary":    job.fit_summary,
+            }
 
-        agent = DocGenAgent(db=db, job_id=job_id)
-        result = await agent.run(job=job, profile=profile, research_context=research_context)
+            agent = DocGenAgent(db=db, job_id=job_id)
+            result = await agent.run(job=job, profile=profile, research_context=research_context)
 
-        app.one_pager_path = result["one_pager_path"]
-        app.one_pager_html = result["one_pager_html"]
-        app.cover_letter_path = result["cover_letter_path"]
-        app.cover_letter_text = result["cover_letter_text"]
-        app.status = "ready"
-        await db.commit()
+            app.one_pager_path = result["one_pager_path"]
+            app.one_pager_html = result["one_pager_html"]
+            app.cover_letter_path = result["cover_letter_path"]
+            app.cover_letter_text = result["cover_letter_text"]
+            app.status = "ready"
+        except Exception as exc:
+            if app is None:
+                app = await _get_or_create_application(job_id, db)
+            app.status = "failed"
+            raise exc
+        finally:
+            await db.commit()
 
 
 # ── Preview (HTML in browser) ─────────────────────────────────────────────────
