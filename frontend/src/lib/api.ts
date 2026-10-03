@@ -180,11 +180,6 @@ export const api = {
       req<{ message: string; application_id: string }>(`/api/applications/${jobId}/generate-docs`, {
         method: 'POST',
       }),
-    /** Generate docs with AI research context — uses strengths/gaps/talking-points to write a more targeted CV. */
-    tailorAndGenerate: (jobId: string) =>
-      req<{ message: string; application_id: string }>(`/api/applications/${jobId}/tailor-and-generate`, {
-        method: 'POST',
-      }),
     updateStatus: (jobId: string, status: string) =>
       req<{ message: string }>(`/api/applications/${jobId}/status?status=${status}`, {
         method: 'PATCH',

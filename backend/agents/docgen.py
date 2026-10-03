@@ -43,8 +43,6 @@ RULES:
 - NEVER invent experience, education, employers, dates, degrees, certifications,
   metrics, or personal details — only use what the profile contains
 - If the profile has no education, return "education": []
-- If AI Research Analysis is provided, use it to guide what to emphasise and
-  which talking points to weave into the summary and bullets
 
 Return ONLY valid JSON (no markdown, no explanation):
 {
@@ -95,80 +93,49 @@ class DocGenAgent(BaseAgent):
             autoescape=select_autoescape(["html"]),
         )
 
-    async def run(
-        self,
-        job: Job,
-        profile: UserProfile,
-        research_context: dict | None = None,
-    ) -> dict:
-        """
-        Generate one-pager + cover letter for a specific job.
-
-        Args:
-            job:              Job record from DB
-            profile:          UserProfile record from DB
-            research_context: Optional dict from ResearchAgent — when provided,
-                              the LLM uses it to guide emphasis and talking points.
-                              Expected keys: strengths, gaps, talking_points,
-                              fit_summary, fit_score.
-
-        Returns:
-            {
-                "one_pager_html":     str,
-                "one_pager_path":     str,
-                "cover_letter_html":  str,
-                "cover_letter_path":  str,
-                "cover_letter_text":  str,
-                "tailored":           bool,  # True when research_context was used
-            }
-        """
-        tailored = research_context is not None
-        mode = "tailored" if tailored else "standard"
-
+    async def run(self, job: Job, profile: UserProfile) -> dict:
+        """Generate one-pager + cover letter for a specific job."""
         await self.emit(
             "started",
-            f"Generating {mode} documents for {job.title} at {job.company}…",
+            f"Generating documents for {job.title} at {job.company}...",
         )
 
         profile_ctx = self._build_profile_context(profile)
-        job_ctx = self._build_job_context(job, research_context)
+        job_ctx = self._build_job_context(job)
 
         # ── Step 1: Generate one-pager content ─────────────────────────────
-        hint = " (using AI research analysis)" if tailored else ""
-        await self.emit("thinking", f"Tailoring your resume to the job description{hint}…")
+        await self.emit("thinking", "Tailoring your resume to the job description...")
         one_pager_data = await self._generate_one_pager_data(job_ctx, profile_ctx)
         one_pager_data["education"] = self._education_from_profile(profile)
 
         # ── Step 2: Generate cover letter ──────────────────────────────────
-        await self.emit("thinking", "Writing your cover letter…")
+        await self.emit("thinking", "Writing your cover letter...")
         cover_paragraphs = await self._generate_cover_letter(job_ctx, profile_ctx)
 
         # ── Step 3: Render HTML ─────────────────────────────────────────────
-        await self.emit("thinking", "Rendering documents…")
-        one_pager_html = self._render_one_pager(one_pager_data, profile, tailored=tailored)
+        await self.emit("thinking", "Rendering documents...")
+        one_pager_html = self._render_one_pager(one_pager_data, profile)
         cover_letter_html = self._render_cover_letter(cover_paragraphs, profile, job)
         cover_letter_text = "\n\n".join(cover_paragraphs)
 
         # ── Step 4: Save files ──────────────────────────────────────────────
         slug = self._slug(job.company, job.title)
-        suffix = "_tailored" if tailored else ""
         docs_dir = Path(settings.documents_dir)
         docs_dir.mkdir(parents=True, exist_ok=True)
 
         one_pager_path = await self._save(
-            one_pager_html, docs_dir / f"one_pager_{slug}{suffix}"
+            one_pager_html, docs_dir / f"one_pager_{slug}"
         )
         cover_letter_path = await self._save(
-            cover_letter_html, docs_dir / f"cover_letter_{slug}{suffix}"
+            cover_letter_html, docs_dir / f"cover_letter_{slug}"
         )
 
         await self.emit(
             "done",
-            f"{mode.capitalize()} documents ready for {job.title} at {job.company} ✓",
+            f"Documents ready for {job.title} at {job.company} ✓",
             {
                 "one_pager_path": one_pager_path,
                 "cover_letter_path": cover_letter_path,
-                "tailored": tailored,
             },
         )
 
@@ -178,7 +145,6 @@ class DocGenAgent(BaseAgent):
             "cover_letter_html": cover_letter_html,
             "cover_letter_path": cover_letter_path,
             "cover_letter_text": cover_letter_text,
-            "tailored": tailored,
         }
 
     # ── LLM generation ────────────────────────────────────────────────────
@@ -223,10 +189,10 @@ class DocGenAgent(BaseAgent):
 
     # ── HTML rendering ────────────────────────────────────────────────────
 
-    def _render_one_pager(self, data: dict, profile: UserProfile, tailored: bool = False) -> str:
+    def _render_one_pager(self, data: dict, profile: UserProfile) -> str:
         try:
             tmpl = self.jinja.get_template("one_pager.html")
-            return tmpl.render(profile=profile, data=data, tailored=tailored)
+            return tmpl.render(profile=profile, data=data)
         except Exception as e:
             log.warning("docgen.template_error", error=str(e))
             return self._fallback_one_pager(data, profile)
@@ -294,8 +260,8 @@ class DocGenAgent(BaseAgent):
         )
 
     @staticmethod
-    def _build_job_context(job: Job, research_context: dict | None = None) -> str:
-        ctx = (
+    def _build_job_context(job: Job) -> str:
+        return (
             f"Title: {job.title}\n"
             f"Company: {job.company}\n"
             f"Location: {job.location or 'Not specified'} "
@@ -304,22 +270,6 @@ class DocGenAgent(BaseAgent):
             f"Salary: {job.salary_range or 'Not specified'}\n"
             f"Description:\n{(job.description or '')[:1500]}"
         )
-        if research_context:
-            strengths  = "\n".join(f"  • {s}" for s in (research_context.get("strengths")  or []))
-            gaps       = "\n".join(f"  • {g}" for g in (research_context.get("gaps")       or []))
-            points     = "\n".join(f"  • {p}" for p in (research_context.get("talking_points") or []))
-            fit_summary = research_context.get("fit_summary", "")
-            fit_score   = research_context.get("fit_score")
-
-            ctx += (
-                f"\n\n--- AI RESEARCH ANALYSIS (use this to guide what to emphasise) ---\n"
-                + (f"Overall fit: {fit_score:.0f}%\n" if fit_score else "")
-                + f"Fit summary: {fit_summary}\n\n"
-                f"Strengths to emphasise in resume:\n{strengths}\n\n"
-                f"Gaps to acknowledge or mitigate:\n{gaps}\n\n"
-                f"Talking points to weave into summary and bullets:\n{points}"
-            )
-        return ctx
 
     @staticmethod
     def _education_from_profile(profile: UserProfile) -> list[dict]:

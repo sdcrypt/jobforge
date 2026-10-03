@@ -137,7 +137,6 @@ function ResearchPanel({ job, onClose }: ResearchPanelProps) {
 
 export default function JobCard({ job, onRefresh }: Props) {
   const [generating, setGenerating]   = useState(false)
-  const [tailoring, setTailoring]     = useState(false)
   const [docsReady, setDocsReady]     = useState(false)
   const [dismissing, setDismissing]   = useState(false)
   const [researching, setResearching] = useState(false)
@@ -185,21 +184,6 @@ export default function JobCard({ job, onRefresh }: Props) {
       setError(e instanceof Error ? e.message : 'Failed to generate docs')
     } finally {
       setGenerating(false)
-    }
-  }
-
-  async function tailorDocs() {
-    setTailoring(true)
-    setDocsReady(false)
-    setError(null)
-    try {
-      await api.applications.tailorAndGenerate(localJob.id)
-      await waitForDocs()
-      onRefresh?.()
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Tailoring failed — is Ollama running?')
-    } finally {
-      setTailoring(false)
     }
   }
 
@@ -357,27 +341,15 @@ export default function JobCard({ job, onRefresh }: Props) {
           </button>
         )}
 
-        {hasResearch ? (
-          <button
-            onClick={tailorDocs}
-            disabled={tailoring}
-            className="text-xs px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-60 transition-colors"
-            title="Generate CV + cover letter guided by AI research analysis"
-          >
-            {tailoring ? 'Tailoring…' : '✨ Tailor Docs'}
-          </button>
-        ) : (
-          <button
-            onClick={generateDocs}
-            disabled={generating}
-            className="text-xs px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-60 transition-colors"
-            title="Generate standard CV + cover letter"
-          >
-            {generating ? 'Generating…' : '📄 Docs'}
-          </button>
-        )}
+        <button
+          onClick={generateDocs}
+          disabled={generating}
+          className="text-xs px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-60 transition-colors"
+        >
+          {generating ? 'Generating…' : '📄 Docs'}
+        </button>
 
-        {(docsReady || generating || tailoring) && (
+        {(docsReady || generating) && (
           <a
             href={api.applications.previewOnePager(localJob.id)}
             target="_blank"
@@ -397,7 +369,7 @@ export default function JobCard({ job, onRefresh }: Props) {
           </a>
         )}
 
-        {(docsReady || generating || tailoring) && (
+        {(docsReady || generating) && (
           <a
             href={api.applications.downloadOnePager(localJob.id)}
             aria-disabled={!docsReady}
