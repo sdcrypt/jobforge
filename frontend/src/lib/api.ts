@@ -93,6 +93,30 @@ export interface Application {
   applied_at: string | null
 }
 
+export interface TopJob {
+  id: string
+  title: string
+  company: string
+  fit_score: number
+  portal: string
+  location: string | null
+  remote: boolean
+  researched_at: string | null
+  url: string
+}
+
+export interface Stats {
+  total_jobs: number
+  researched: number
+  high_fit: number
+  docs_generated: number
+  avg_fit_score: number | null
+  by_portal: Record<string, number>
+  score_buckets: Record<string, number>
+  top_jobs: TopJob[]
+  last_pipeline: { run_at: string; found: number } | null
+}
+
 export interface AgentEventData {
   agent: string
   status: 'started' | 'thinking' | 'done' | 'error'
@@ -170,6 +194,11 @@ export const api = {
       const qs = portal ? `?portal=${portal}` : ''
       return req<{ message: string; deleted: number }>(`/api/jobs/clear${qs}`, { method: 'DELETE' })
     },
+  },
+
+  // ── Stats ───────────────────────────────────────────────────────────────
+  stats: {
+    get: () => req<Stats>('/api/jobs/stats'),
   },
 
   // ── Applications ─────────────────────────────────────────────────────────

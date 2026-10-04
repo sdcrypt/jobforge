@@ -124,6 +124,117 @@ async def list_jobs(
     return {"jobs": jobs, "count": len(jobs)}
 
 
+@router.get("/stats")
+async def get_stats(db: AsyncSession = Depends(get_db)):
+    """Aggregated stats for the dashboard — total, researched, fit buckets, top jobs."""
+    from sqlalchemy import func
+    from models.application import Application
+    from models.search_config import SearchConfig
+
+    # Counts
+    total_r = await db.execute(
+        select(func.count(Job.id)).where(Job.status != "dismissed")
+    )
+    total = total_r.scalar() or 0
+
+    researched_r = await db.execute(
+        select(func.count(Job.id)).where(
+            Job.researched_at != None,  # noqa: E711
+            Job.status != "dismissed",
+        )
+    )
+    researched = researched_r.scalar() or 0
+
+    high_fit_r = await db.execute(
+        select(func.count(Job.id)).where(
+            Job.fit_score >= 70, Job.status != "dismissed"
+        )
+    )
+    high_fit = high_fit_r.scalar() or 0
+
+    avg_r = await db.execute(
+        select(func.avg(Job.fit_score)).where(
+            Job.fit_score != None,  # noqa: E711
+            Job.status != "dismissed",
+        )
+    )
+    avg_score = avg_r.scalar()
+
+    docs_r = await db.execute(
+        select(func.count(Application.id)).where(Application.one_pager_path != None)  # noqa: E711
+    )
+    docs = docs_r.scalar() or 0
+
+    # Portal breakdown
+    portal_r = await db.execute(
+        select(Job.portal, func.count(Job.id))
+        .where(Job.status != "dismissed")
+        .group_by(Job.portal)
+    )
+    by_portal = {row[0]: row[1] for row in portal_r.all()}
+
+    # Score buckets
+    scores_r = await db.execute(
+        select(Job.fit_score).where(
+            Job.fit_score != None,  # noqa: E711
+            Job.status != "dismissed",
+        )
+    )
+    buckets: dict[str, int] = {"85-100": 0, "70-84": 0, "50-69": 0, "30-49": 0, "0-29": 0}
+    for (s,) in scores_r.all():
+        if s >= 85:   buckets["85-100"] += 1
+        elif s >= 70: buckets["70-84"] += 1
+        elif s >= 50: buckets["50-69"] += 1
+        elif s >= 30: buckets["30-49"] += 1
+        else:         buckets["0-29"] += 1
+
+    # Top 5 jobs
+    top_r = await db.execute(
+        select(Job)
+        .where(Job.fit_score != None, Job.status != "dismissed")  # noqa: E711
+        .order_by(desc(Job.fit_score))
+        .limit(5)
+    )
+    top_jobs = [
+        {
+            "id": j.id,
+            "title": j.title,
+            "company": j.company,
+            "fit_score": j.fit_score,
+            "portal": j.portal,
+            "location": j.location,
+            "remote": j.remote,
+            "researched_at": j.researched_at.isoformat() if j.researched_at else None,
+            "url": j.url,
+        }
+        for j in top_r.scalars().all()
+    ]
+
+    # Last pipeline run
+    config_r = await db.execute(
+        select(SearchConfig).where(SearchConfig.active == True).limit(1)  # noqa: E712
+    )
+    config = config_r.scalar_one_or_none()
+    last_pipeline = None
+    if config and config.last_run_at:
+        last_pipeline = {
+            "run_at": config.last_run_at.isoformat(),
+            "found": config.last_run_found or 0,
+        }
+
+    return {
+        "total_jobs": total,
+        "researched": researched,
+        "high_fit": high_fit,
+        "docs_generated": docs,
+        "avg_fit_score": round(float(avg_score), 1) if avg_score else None,
+        "by_portal": by_portal,
+        "score_buckets": buckets,
+        "top_jobs": top_jobs,
+        "last_pipeline": last_pipeline,
+    }
+
+
 @router.get("/{job_id}")
 async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Job).where(Job.id == job_id))

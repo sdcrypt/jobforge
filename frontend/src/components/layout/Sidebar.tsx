@@ -5,9 +5,10 @@ import { usePathname } from 'next/navigation'
 import clsx from 'clsx'
 
 const NAV = [
-  { href: '/jobs',    label: 'Jobs',          icon: '💼' },
-  { href: '/search',  label: 'Search Config', icon: '🔍' },
-  { href: '/profile', label: 'My Profile',    icon: '👤' },
+  { href: '/dashboard', label: 'Dashboard',     icon: '📊' },
+  { href: '/jobs',      label: 'Jobs',           icon: '💼' },
+  { href: '/search',    label: 'Search Config',  icon: '🔍' },
+  { href: '/profile',   label: 'My Profile',     icon: '👤' },
 ]
 
 export default function Sidebar() {
@@ -46,7 +47,7 @@ export default function Sidebar() {
 
       {/* Footer */}
       <div className="px-5 py-4 border-t border-slate-800">
-        <p className="text-slate-600 text-xs">Phase 4 MVP</p>
+        <p className="text-slate-600 text-xs">Local · Private · No cloud</p>
       </div>
     </aside>
   )
