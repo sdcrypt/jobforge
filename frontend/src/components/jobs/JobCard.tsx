@@ -365,7 +365,7 @@ export default function JobCard({ job, onRefresh }: Props) {
                 : 'border-slate-200 text-slate-300 pointer-events-none',
             )}
           >
-            Preview
+            Preview Resume
           </a>
         )}
 
@@ -383,7 +383,25 @@ export default function JobCard({ job, onRefresh }: Props) {
                 : 'border-slate-200 text-slate-300 pointer-events-none',
             )}
           >
-            ↓ PDF
+            Resume PDF
+          </a>
+        )}
+
+        {(docsReady || generating) && (
+          <a
+            href={api.applications.downloadCoverLetter(localJob.id)}
+            aria-disabled={!docsReady}
+            onClick={(e) => {
+              if (!docsReady) e.preventDefault()
+            }}
+            className={clsx(
+              'text-xs px-3 py-1.5 rounded-lg border transition-colors',
+              docsReady
+                ? 'border-brand-200 text-brand-600 hover:bg-brand-50'
+                : 'border-slate-200 text-slate-300 pointer-events-none',
+            )}
+          >
+            Cover Letter PDF
           </a>
         )}
 
