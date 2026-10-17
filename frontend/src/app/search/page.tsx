@@ -4,6 +4,7 @@ import { useState, useEffect, FormEvent } from 'react'
 import { api, SearchConfig } from '@/lib/api'
 
 const PORTALS: { id: string; label: string; note: string }[] = [
+  { id: 'jobleads',       label: 'JobLeads',             note: 'Public listings' },
   { id: 'linkedin',       label: '🔗 LinkedIn',         note: 'Public guest API — works well' },
   { id: 'remoteok',       label: '🌍 RemoteOK',          note: 'Free JSON API — remote tech jobs with salary' },
   { id: 'weworkremotely', label: '🏠 We Work Remotely',  note: 'RSS feed — senior remote roles' },

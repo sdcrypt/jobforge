@@ -4,7 +4,7 @@ Reads from .env file. Change LLM_BASE_URL to switch providers.
 """
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator
+from pydantic import Field, field_validator
 import json
 
 
@@ -36,6 +36,9 @@ class Settings(BaseSettings):
 
     # Documents
     documents_dir: str = "./documents"
+
+    # Fallback market for city-only and Remote searches; UI country names override it.
+    jobleads_country: str = Field(default="in", pattern=r"^[a-z]{2}$")
 
     # CORS
     cors_origins: list[str] = ["http://localhost:3000"]

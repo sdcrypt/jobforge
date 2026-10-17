@@ -7,6 +7,7 @@ Portals:
   remoteok        — RemoteOK free public JSON API
   weworkremotely  — We Work Remotely RSS feed
   hackernews      — HackerNews "Who is Hiring" (Algolia search API)
+  jobleads        — JobLeads public search pages
 
 Rate limiting and in-memory deduplication are handled here.
 Final DB deduplication (URL + company+title) is done in pipeline.py.
@@ -31,7 +32,7 @@ USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
 ]
 
-SUPPORTED_PORTALS = {"linkedin", "remoteok", "weworkremotely", "hackernews"}
+SUPPORTED_PORTALS = {"linkedin", "remoteok", "weworkremotely", "hackernews", "jobleads"}
 
 
 def _ua() -> str:
@@ -94,6 +95,7 @@ class SearchAgent(BaseAgent):
                     portal, keyword, location, remote_only,
                     max_results=max_results,
                     linkedin_pages=linkedin_pages,
+                    posted_within_days=posted_within_days,
                 )
 
         results = await asyncio.gather(
@@ -130,6 +132,7 @@ class SearchAgent(BaseAgent):
         remote_only: bool,
         max_results: int = 15,
         linkedin_pages: int = 1,
+        posted_within_days: int = 7,
     ) -> list[dict]:
         try:
             if portal == "linkedin":
@@ -141,6 +144,13 @@ class SearchAgent(BaseAgent):
                 return await self._search_weworkremotely(keyword, max_results=max_results)
             elif portal == "hackernews":
                 return await self._search_hackernews(keyword, remote_only, max_results=max_results)
+            elif portal == "jobleads":
+                from agents.jobleads import JobLeadsAgent
+                return await JobLeadsAgent().run(
+                    keyword=keyword, location=location, remote_only=remote_only,
+                    max_results=max_results,
+                    posted_within_days=posted_within_days,
+                )
             else:
                 return []
         except Exception as e:

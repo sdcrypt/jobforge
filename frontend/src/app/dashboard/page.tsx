@@ -232,6 +232,7 @@ export default function DashboardPage() {
   }
 
   const PORTAL_LABELS: Record<string, string> = {
+    jobleads:       'JobLeads',
     linkedin:       '🔗 LinkedIn',
     remoteok:       '🌍 RemoteOK',
     weworkremotely: '🏠 WWR',

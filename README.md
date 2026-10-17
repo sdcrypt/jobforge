@@ -56,12 +56,27 @@ All agents emit real-time events to the frontend via WebSocket — you watch the
 
 | Portal | Type | Coverage |
 |--------|------|----------|
+| **JobLeads** | Public HTML search pages | Configurable country market (India by default) |
 | 🔗 **LinkedIn** | HTML scrape (guest API) | Global, all industries — up to 4 pages × 25 results |
 | 🌍 **RemoteOK** | Free JSON API | Remote tech jobs, salary data included |
 | 🏠 **We Work Remotely** | RSS feed | Senior remote roles, 3 category feeds |
 | 🟠 **HackerNews Hiring** | Algolia API | Monthly "Who is Hiring" thread — startups, founding roles |
 
 > Portals with reCAPTCHA v3 (Naukri, Indeed, Glassdoor) block automated scraping and are not included. Google Careers and Amazon Jobs are on the roadmap.
+
+Select **JobLeads** in Search Config to include its dedicated agent in the pipeline.
+Enter country names in the UI's Locations field, for example `Germany, Singapore,
+India`, to search all three markets in the same pipeline run. Country names and
+their two-letter codes select the corresponding JobLeads market automatically.
+`JOBLEADS_COUNTRY` in `backend/.env` is only the fallback for city-only locations
+such as `Berlin` or `Remote` (default: `in`). Set it to `de` for city-only searches
+within Germany. Country entries search the whole market without a city filter.
+Searches collect up to four public
+pages, respect the result limit and remote filter, and use the existing ranking
+and research agents. No additional model or JobLeads credentials are needed.
+Availability depends on JobLeads returning public HTML listings; login-only or
+blocked pages cannot be searched. Relative posting dates are parsed when exact;
+labels such as "14 days+" are left without an exact timestamp.
 
 ---
 

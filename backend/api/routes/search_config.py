@@ -16,6 +16,7 @@ SUPPORTED_PORTALS = {
     "remoteok",
     "weworkremotely",
     "hackernews",
+    "jobleads",
 }
 
 
