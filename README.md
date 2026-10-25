@@ -108,8 +108,34 @@ labels such as "14 days+" are left without an exact timestamp.
 ### Frontend
 - Real-time agent activity feed (WebSocket)
 - Jobs board with status tabs and fit score filter
-- Dismiss jobs to hide them, clear all to reset
+- Dismiss jobs to hide them; clear untracked jobs while preserving applications
 - Research panel expands inline on each job card
+
+### Application Tracker
+- **Applications** page with board and table views, company/role/contact search, stage filters, and due follow-ups
+- **Save job** and **Mark applied** actions on job cards; recording an application does not submit it to the employer
+- Application lifecycle: Saved → Preparing → Applied → Screening → Interviewing → Offer → Accepted / Rejected / Withdrawn
+- Validated transitions allow skipping screening/interview stages when appropriate; terminal outcomes close the lifecycle
+- Recruiter name, email and phone; application date, deadline, notes, preparation notes, and outcome
+- Interview rounds with dates, interviewers, preparation, notes, and outcomes
+- Follow-up reminders with completion controls and an in-app due list; no email or push notifications
+- Timestamped status history with optional notes and protection against stale status updates
+- Separate document status (`not_started`, `generating`, `ready`, `failed`); regenerating documents preserves submitted application stages
+- Tracked jobs are preserved by stale-job cleanup and the Jobs page's Clear action
+
+Existing application records are upgraded automatically on backend startup. Legacy
+document states become preparation/document states, and legacy job tracking states
+move into application records. Existing document references are retained. Rebuild
+the services with `docker compose up -d --build` after updating.
+
+The tracker API uses job IDs: `PUT /api/applications/{job_id}` saves a job,
+`PATCH /api/applications/{job_id}` edits details, and
+`PATCH /api/applications/{job_id}/status` accepts a JSON body containing `status`,
+`expected_status`, and an optional `note`. Responses include the job summary,
+status history, document status, and allowed next stages. Dates are stored in UTC
+and displayed in the browser's local timezone.
+
+Run backend tests with `docker compose exec backend python -m unittest discover -s tests -v`.
 
 ---
 
@@ -194,6 +220,7 @@ Then open:
 4. **Jobs** → browse ranked cards, click 📊 Analysis to see full AI fit report
 5. **Docs** → click 📄 Docs to generate tailored one-pager + cover letter PDF
 6. **Apply** → open the job URL, use the generated PDFs to apply
+7. **Applications** → record the application, manage contacts and follow-ups, track interviews and outcomes
 
 ---
 

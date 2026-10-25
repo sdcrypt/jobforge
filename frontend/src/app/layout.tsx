@@ -17,9 +17,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
         {/* Main content — offset by sidebar width */}
         <main className="ml-[220px] min-h-screen flex flex-col">
-          <div className="flex-1 flex">
+          <div className="flex-1 flex min-w-0">
             {/* Page content */}
-            <div className="flex-1 px-6 py-6 overflow-y-auto">
+            <div className="flex-1 min-w-0 px-6 py-6 overflow-y-auto">
               {children}
             </div>
 

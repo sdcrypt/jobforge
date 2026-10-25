@@ -1,6 +1,6 @@
 """
 JobForge — Application model
-Tracks every job application from draft → offer/rejected.
+Tracks the application lifecycle independently of document generation.
 """
 
 import uuid
@@ -17,11 +17,9 @@ class Application(Base):
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )
 
-    job_id: Mapped[str] = mapped_column(String(36), ForeignKey("jobs.id"), index=True)
+    job_id: Mapped[str] = mapped_column(String(36), ForeignKey("jobs.id"), index=True, unique=True)
 
-    # Pipeline status
-    status: Mapped[str] = mapped_column(String(30), default="draft", index=True)
-    # draft → ready → applied → screening → interviewing → offer → accepted → rejected
+    status: Mapped[str] = mapped_column(String(30), default="saved", index=True)
 
     # Generated documents
     one_pager_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -42,6 +40,19 @@ class Application(Base):
     # Outcome
     offer_details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    document_status: Mapped[str] = mapped_column(String(30), default="not_started")
+    document_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recruiter_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    recruiter_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
+    recruiter_phone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    preparation_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    outcome: Mapped[str | None] = mapped_column(Text, nullable=True)
+    deadline_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    follow_up_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    follow_up_completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    status_history: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

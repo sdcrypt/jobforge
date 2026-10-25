@@ -1,7 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { Job, api } from '@/lib/api'
+import Link from 'next/link'
+import { Application, ApplicationStatus, Job, api } from '@/lib/api'
+import { statusLabel } from '@/lib/applications'
 import clsx from 'clsx'
 
 interface Props {
@@ -142,6 +144,8 @@ export default function JobCard({ job, onRefresh }: Props) {
   const [researching, setResearching] = useState(false)
   const [showPanel, setShowPanel]     = useState(false)
   const [error, setError]             = useState<string | null>(null)
+  const [application, setApplication] = useState<Application | null>(null)
+  const [tracking, setTracking] = useState(false)
 
   // Local copy of research data — updated optimistically after API call
   const [localJob, setLocalJob] = useState<Job>(job)
@@ -158,8 +162,9 @@ export default function JobCard({ job, onRefresh }: Props) {
     let cancelled = false
     api.applications.get(localJob.id)
       .then((app) => {
-        if (!cancelled && app.status === 'ready' && app.one_pager_path) {
-          setDocsReady(true)
+        if (!cancelled) {
+          setApplication(app)
+          setDocsReady(Boolean(app.one_pager_path))
         }
       })
       .catch(() => {
@@ -168,7 +173,22 @@ export default function JobCard({ job, onRefresh }: Props) {
     return () => {
       cancelled = true
     }
-  }, [localJob.id])
+  }, [localJob.id, job])
+
+  async function track(status: ApplicationStatus) {
+    setTracking(true)
+    setError(null)
+    try {
+      let current = await api.applications.save(localJob.id)
+      if (status !== 'saved') current = await api.applications.updateStatus(localJob.id, status, current.status)
+      setApplication(current)
+      onRefresh?.()
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : 'Could not update application')
+    } finally {
+      setTracking(false)
+    }
+  }
 
   // ── Actions ──────────────────────────────────────────────────────────────
 
@@ -192,12 +212,13 @@ export default function JobCard({ job, onRefresh }: Props) {
       await new Promise((resolve) => setTimeout(resolve, 2000))
       const app = await api.applications.get(localJob.id).catch(() => null)
       if (!app) continue
-      if (app.status === 'ready' && app.one_pager_path) {
+      if (app.document_status === 'ready' && app.one_pager_path) {
+        setApplication(app)
         setDocsReady(true)
         return
       }
-      if (app.status === 'failed') {
-        throw new Error('Document generation failed. Check backend logs for the DocGen error.')
+      if (app.document_status === 'failed') {
+        throw new Error(app.document_error || 'Document generation failed. Please try again.')
       }
     }
     throw new Error('Document generation is still running. Check the Agent Feed or try Preview again in a minute.')
@@ -258,6 +279,11 @@ export default function JobCard({ job, onRefresh }: Props) {
 
       {/* Badges: portal / job type / salary */}
       <div className="flex flex-wrap gap-1.5">
+        {application && (
+          <Link href="/applications" className="text-xs bg-brand-50 text-brand-700 rounded px-2 py-0.5">
+            {statusLabel(application.status)}
+          </Link>
+        )}
         <span className="text-xs bg-slate-100 text-slate-600 rounded px-2 py-0.5 capitalize">
           {localJob.portal}
         </span>
@@ -310,6 +336,16 @@ export default function JobCard({ job, onRefresh }: Props) {
 
       {/* Actions row */}
       <div className="flex gap-2 flex-wrap mt-auto items-center">
+        {!application && (
+          <button onClick={() => track('saved')} disabled={tracking} className="text-xs px-3 py-1.5 rounded-lg border border-brand-200 text-brand-700 disabled:opacity-50">
+            {tracking ? 'Saving…' : 'Save job'}
+          </button>
+        )}
+        {(!application || application.allowed_transitions.includes('applied')) && (
+          <button onClick={() => track('applied')} disabled={tracking} className="text-xs px-3 py-1.5 rounded-lg border border-brand-200 text-brand-700 disabled:opacity-50">
+            Mark applied
+          </button>
+        )}
         <a
           href={localJob.url}
           target="_blank"

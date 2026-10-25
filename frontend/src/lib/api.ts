@@ -13,7 +13,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(err.detail || `HTTP ${res.status}`)
+    throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail || `HTTP ${res.status}`))
   }
   return res.json()
 }
@@ -84,13 +84,46 @@ export interface SearchConfig {
   last_run_found: number
 }
 
-export interface Application {
+export type ApplicationStatus = 'saved' | 'preparing' | 'applied' | 'screening' | 'interviewing' | 'offer' | 'accepted' | 'rejected' | 'withdrawn'
+
+export interface InterviewRound {
+  id: string
+  round: number
+  type: string
+  date: string | null
+  interviewer: string | null
+  preparation_notes: string | null
+  notes: string | null
+  outcome: string | null
+}
+
+export interface ApplicationDetails {
+  applied_at: string | null
+  recruiter_name: string | null
+  recruiter_email: string | null
+  recruiter_phone: string | null
+  notes: string | null
+  preparation_notes: string | null
+  outcome: string | null
+  deadline_at: string | null
+  follow_up_at: string | null
+  follow_up_completed_at: string | null
+  interview_rounds: InterviewRound[]
+}
+
+export interface Application extends ApplicationDetails {
   id: string
   job_id: string
-  status: string
+  status: ApplicationStatus
+  document_status: 'not_started' | 'generating' | 'ready' | 'failed'
+  document_error: string | null
   one_pager_path: string | null
   cover_letter_path: string | null
-  applied_at: string | null
+  created_at: string
+  updated_at: string
+  allowed_transitions: ApplicationStatus[]
+  status_history: { from_status: ApplicationStatus | null; to_status: ApplicationStatus; changed_at: string; note: string | null }[] | null
+  job: Pick<Job, 'id' | 'title' | 'company' | 'url' | 'location' | 'portal' | 'fit_score'>
 }
 
 export interface TopJob {
@@ -174,9 +207,10 @@ export const api = {
 
   // ── Jobs ────────────────────────────────────────────────────────────────
   jobs: {
-    list: (params?: { status?: string; min_score?: number; limit?: number }) => {
+    list: (params?: { status?: string; application_status?: string; min_score?: number; limit?: number }) => {
       const qs = new URLSearchParams()
       if (params?.status)    qs.set('status', params.status)
+      if (params?.application_status) qs.set('application_status', params.application_status)
       if (params?.min_score) qs.set('min_score', String(params.min_score))
       if (params?.limit)     qs.set('limit', String(params.limit))
       return req<{ jobs: Job[]; count: number }>(`/api/jobs?${qs}`)
@@ -205,13 +239,17 @@ export const api = {
   applications: {
     list: () => req<{ applications: Application[]; count: number }>('/api/applications'),
     get: (jobId: string) => req<Application>(`/api/applications/${jobId}`),
+    save: (jobId: string) => req<Application>(`/api/applications/${jobId}`, { method: 'PUT' }),
+    update: (jobId: string, data: Partial<ApplicationDetails>) =>
+      req<Application>(`/api/applications/${jobId}`, { method: 'PATCH', body: JSON.stringify(data) }),
     generateDocs: (jobId: string) =>
       req<{ message: string; application_id: string }>(`/api/applications/${jobId}/generate-docs`, {
         method: 'POST',
       }),
-    updateStatus: (jobId: string, status: string) =>
-      req<{ message: string }>(`/api/applications/${jobId}/status?status=${status}`, {
+    updateStatus: (jobId: string, status: ApplicationStatus, expectedStatus: ApplicationStatus, note?: string) =>
+      req<Application>(`/api/applications/${jobId}/status`, {
         method: 'PATCH',
+        body: JSON.stringify({ status, expected_status: expectedStatus, note: note || null }),
       }),
     previewOnePager: (jobId: string) =>
       `${BASE}/api/applications/${jobId}/preview/one-pager`,

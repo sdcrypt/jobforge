@@ -187,18 +187,7 @@ async def _cleanup_stale_jobs(db: AsyncSession, posted_within_days: int) -> int:
         "offered",
         "rejected",
     }
-    protected_application_statuses = {
-        "applied",
-        "screening",
-        "interviewing",
-        "offer",
-        "accepted",
-        "rejected",
-    }
-
-    protected_application_job_ids = select(Application.job_id).where(
-        Application.status.in_(protected_application_statuses)
-    )
+    protected_application_job_ids = select(Application.job_id)
 
     stale_job_ids = select(Job.id).where(
         or_(
@@ -213,7 +202,6 @@ async def _cleanup_stale_jobs(db: AsyncSession, posted_within_days: int) -> int:
     if not stale_ids:
         return 0
 
-    await db.execute(delete(Application).where(Application.job_id.in_(stale_ids)))
     result = await db.execute(delete(Job).where(Job.id.in_(stale_ids)))
     await db.flush()
 

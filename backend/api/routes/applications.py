@@ -7,7 +7,11 @@ from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from core.database import get_db
+from core.application_lifecycle import (
+    ApplicationUpdate, StatusChange, TRANSITIONS, history_entry, transition,
+)
 from models.job import Job
 from models.profile import UserProfile
 from models.application import Application
@@ -30,11 +34,12 @@ async def generate_docs(
     await _get_job(job_id, db)
     await _get_profile(db)
     app = await _get_or_create_application(job_id, db)
-    app.status = "generating"
-    app.one_pager_path = None
-    app.cover_letter_path = None
-    app.one_pager_html = None
-    app.cover_letter_text = None
+    if app.document_status == "generating":
+        raise HTTPException(409, "Documents are already being generated for this job.")
+    if app.status == "saved":
+        transition(app, "preparing", "Started preparing application documents")
+    app.document_status = "generating"
+    app.document_error = None
     await db.commit()
 
     background_tasks.add_task(_run_docgen, job_id)
@@ -53,7 +58,7 @@ async def _run_docgen(job_id: str):
         try:
             job = await _get_job(job_id, db)
             profile = await _get_profile(db)
-            app = await _get_or_create_application(job_id, db)
+            app = await _get_application(job_id, db)
 
             agent = DocGenAgent(db=db, job_id=job_id)
             result = await agent.run(job=job, profile=profile)
@@ -62,14 +67,16 @@ async def _run_docgen(job_id: str):
             app.one_pager_html = result["one_pager_html"]
             app.cover_letter_path = result["cover_letter_path"]
             app.cover_letter_text = result["cover_letter_text"]
-            app.status = "ready"
+            app.document_status = "ready"
+            app.document_error = None
         except Exception as exc:
-            if app is None:
-                app = await _get_or_create_application(job_id, db)
-            app.status = "failed"
-            raise exc
-        finally:
+            await db.rollback()
+            app = await _get_application(job_id, db)
+            app.document_status = "failed"
+            app.document_error = str(exc)[:2000]
             await db.commit()
+            raise
+        await db.commit()
 
 
 # ── Preview (HTML in browser) ─────────────────────────────────────────────────
@@ -142,8 +149,10 @@ async def start_apply(
 ):
     """Start the Apply Agent. Always pauses for user review before submitting."""
     app = await _get_or_create_application(job_id, db)
-    if app.status not in ("ready", "draft"):
+    if app.document_status != "ready":
         raise HTTPException(400, "Generate documents first (POST /generate-docs).")
+    if app.status not in ("saved", "preparing"):
+        raise HTTPException(409, "This application has already progressed beyond preparation.")
     background_tasks.add_task(_run_apply, job_id)
     return {"message": "Apply Agent started. A browser window will open for your review."}
 
@@ -154,11 +163,11 @@ async def _run_apply(job_id: str):
     async with AsyncSessionLocal() as db:
         job = await _get_job(job_id, db)
         profile = await _get_profile(db)
-        app = await _get_or_create_application(job_id, db)
+        app = await _get_application(job_id, db)
         agent = ApplyAgent(db=db, job_id=job_id)
         result = await agent.run(job=job, profile=profile, application=app)
         if result["status"] == "filled":
-            app.status = "applying"
+            app.apply_notes = "Form filled; awaiting manual review and submission."
         await db.commit()
 
 
@@ -166,28 +175,68 @@ async def _run_apply(job_id: str):
 
 @router.get("")
 async def list_applications(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Application))
-    apps = result.scalars().all()
+    result = await db.execute(
+        select(Application, Job).join(Job, Application.job_id == Job.id)
+        .order_by(Application.updated_at.desc())
+    )
+    apps = [_serialize(app, job) for app, job in result.all()]
     return {"applications": apps, "count": len(apps)}
 
 
 @router.get("/{job_id}")
 async def get_application(job_id: str, db: AsyncSession = Depends(get_db)):
     app = await _get_application(job_id, db)
-    return app
+    return _serialize(app, await _get_job(job_id, db))
+
+
+@router.put("/{job_id}")
+async def save_application(job_id: str, db: AsyncSession = Depends(get_db)):
+    app = await _get_or_create_application(job_id, db)
+    return _serialize(app, await _get_job(job_id, db))
+
+
+@router.patch("/{job_id}")
+async def update_application(
+    job_id: str, data: ApplicationUpdate, db: AsyncSession = Depends(get_db),
+):
+    app = await _get_application(job_id, db, lock=True)
+    values = data.model_dump(exclude_unset=True)
+    if "interview_rounds" in values:
+        identifiers = [entry.id for entry in data.interview_rounds]
+        if len(set(identifiers)) != len(identifiers):
+            raise HTTPException(422, "Interview round IDs must be unique.")
+        values["interview_rounds"] = [
+            entry.model_dump(mode="json") for entry in data.interview_rounds
+        ]
+    if "applied_at" in values and values["applied_at"] is None and app.applied_at is not None:
+        raise HTTPException(422, "An existing application date cannot be cleared.")
+    if "follow_up_at" in values and values["follow_up_at"] != app.follow_up_at:
+        values["follow_up_completed_at"] = None
+    follow_up = values.get("follow_up_at", app.follow_up_at)
+    if values.get("follow_up_completed_at") and not follow_up:
+        raise HTTPException(422, "Set a follow-up reminder before marking it complete.")
+    for field, value in values.items():
+        setattr(app, field, value)
+    await db.flush()
+    return _serialize(app, await _get_job(job_id, db))
 
 
 @router.patch("/{job_id}/status")
 async def update_status(
     job_id: str,
-    status: str,
+    data: StatusChange,
     db: AsyncSession = Depends(get_db),
 ):
     """Manually update status (e.g. after an interview)."""
     app = await _get_or_create_application(job_id, db)
-    app.status = status
+    if app.status != data.expected_status.value:
+        raise HTTPException(409, "Application status changed. Refresh and try again.")
+    try:
+        transition(app, data.status.value, data.note)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
     await db.flush()
-    return {"message": f"Status updated to '{status}'"}
+    return _serialize(app, await _get_job(job_id, db))
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -208,8 +257,11 @@ async def _get_profile(db: AsyncSession) -> UserProfile:
     return profile
 
 
-async def _get_application(job_id: str, db: AsyncSession) -> Application:
-    r = await db.execute(select(Application).where(Application.job_id == job_id))
+async def _get_application(job_id: str, db: AsyncSession, lock: bool = False) -> Application:
+    query = select(Application).where(Application.job_id == job_id)
+    if lock:
+        query = query.with_for_update()
+    r = await db.execute(query)
     app = r.scalar_one_or_none()
     if not app:
         raise HTTPException(404, "No application found for this job.")
@@ -217,10 +269,32 @@ async def _get_application(job_id: str, db: AsyncSession) -> Application:
 
 
 async def _get_or_create_application(job_id: str, db: AsyncSession) -> Application:
-    r = await db.execute(select(Application).where(Application.job_id == job_id))
+    job = await db.execute(select(Job).where(Job.id == job_id).with_for_update())
+    if job.scalar_one_or_none() is None:
+        raise HTTPException(404, "Job not found")
+    r = await db.execute(
+        select(Application).where(Application.job_id == job_id).with_for_update()
+    )
     app = r.scalar_one_or_none()
     if not app:
-        app = Application(job_id=job_id)
-        db.add(app)
-        await db.flush()
+        try:
+            async with db.begin_nested():
+                app = Application(
+                    job_id=job_id, status="saved",
+                    status_history=[history_entry(None, "saved", "Saved job")],
+                )
+                db.add(app)
+                await db.flush()
+        except IntegrityError:
+            app = await _get_application(job_id, db, lock=True)
     return app
+
+
+def _serialize(app: Application, job: Job) -> dict:
+    values = {column.name: getattr(app, column.name) for column in Application.__table__.columns}
+    values["job"] = {
+        field: getattr(job, field)
+        for field in ("id", "title", "company", "url", "location", "portal", "fit_score")
+    }
+    values["allowed_transitions"] = list(TRANSITIONS.get(app.status, ()))
+    return values

@@ -107,10 +107,16 @@ async def list_jobs(
     portal: str | None = None,
     limit: int = Query(default=20, le=100),
     offset: int = 0,
+    application_status: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """List jobs with optional filters, sorted by fit_score descending."""
     q = select(Job)
+    if application_status:
+        from models.application import Application
+        q = q.where(Job.id.in_(select(Application.job_id).where(
+            Application.status == application_status
+        )))
     if status:
         q = q.where(Job.status == status)
     if portal:
@@ -306,12 +312,11 @@ async def clear_jobs(
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Delete jobs from DB.
-    - portal=None  → delete ALL jobs (full reset)
-    - portal=linkedin → delete only LinkedIn jobs
-    Dismissed / applied jobs are also removed — use with care.
+    Delete untracked jobs, optionally restricted to one portal.
+    Jobs with application records are always preserved.
     """
-    q = delete(Job)
+    from models.application import Application
+    q = delete(Job).where(Job.id.notin_(select(Application.job_id)))
     if portal:
         q = q.where(Job.portal == portal)
     result = await db.execute(q)

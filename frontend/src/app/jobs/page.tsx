@@ -5,19 +5,18 @@ import { useJobs } from '@/hooks/useJobs'
 import JobCard from '@/components/jobs/JobCard'
 import { api } from '@/lib/api'
 
-const STATUS_TABS = ['all', 'new', 'reviewed', 'applied', 'rejected'] as const
+const STATUS_TABS = ['all', 'new', 'ranked', 'saved', 'preparing', 'applied', 'interviewing', 'offer', 'rejected'] as const
 type StatusTab = typeof STATUS_TABS[number]
 
 export default function JobsPage() {
-  const { jobs, isLoading, refresh } = useJobs()
   const [activeTab, setActiveTab] = useState<StatusTab>('all')
+  const { jobs, isLoading, error, refresh } = useJobs(activeTab)
   const [minScore, setMinScore] = useState(0)
   const [runningPipeline, setRunningPipeline] = useState(false)
   const [pipelineMsg, setPipelineMsg] = useState<string | null>(null)
   const [clearing, setClearing] = useState(false)
 
   const filtered = jobs
-    .filter((j) => activeTab === 'all' || j.status === activeTab)
     .filter((j) => j.fit_score == null || j.fit_score >= minScore)
     .sort((a, b) => (b.fit_score ?? 0) - (a.fit_score ?? 0))
 
@@ -39,7 +38,7 @@ export default function JobsPage() {
   }
 
   async function clearJobs() {
-    if (!confirm('Delete ALL jobs from the database? This cannot be undone.')) return
+    if (!confirm('Delete untracked jobs? Saved applications and their jobs are preserved. This cannot be undone.')) return
     setClearing(true)
     try {
       const res = await api.jobs.clear()
@@ -66,7 +65,7 @@ export default function JobsPage() {
           <button
             onClick={clearJobs}
             disabled={clearing || jobs.length === 0}
-            title="Clear all jobs from DB"
+            title="Clear jobs that are not tracked as applications"
             className="px-3 py-2 border border-slate-200 text-slate-500 rounded-lg text-sm hover:border-red-300 hover:text-red-500 disabled:opacity-40 transition-colors"
           >
             {clearing ? '…' : '🗑 Clear'}
@@ -138,7 +137,7 @@ export default function JobsPage() {
       ) : filtered.length === 0 ? (
         <div className="text-center py-16 text-slate-400">
           <div className="text-4xl mb-3">💼</div>
-          <p className="font-medium">No jobs found</p>
+          <p className="font-medium">{error ? 'Could not load jobs. Please try again.' : 'No jobs found'}</p>
           <p className="text-sm mt-1">
             {jobs.length === 0
               ? 'Run the pipeline to search for jobs'

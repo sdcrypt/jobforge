@@ -48,7 +48,6 @@ class Job(Base):
     status: Mapped[str] = mapped_column(
         String(30), default="new", index=True
     )
-    # new → ranked → saved → applying → applied → interviewing → offered → rejected
 
     # Timestamps
     found_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

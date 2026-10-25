@@ -4,10 +4,10 @@ import useSWR from 'swr'
 import { api, Job } from '@/lib/api'
 
 // Backend caps list responses at 100 jobs.
-const fetcher = () => api.jobs.list({ limit: 100 }).then((r) => r.jobs)
-
-export function useJobs() {
-  const { data, error, isLoading, mutate } = useSWR<Job[]>('/api/jobs', fetcher, {
+export function useJobs(status = 'all') {
+  const params = status === 'all' ? {} : ['new', 'ranked'].includes(status)
+    ? { status } : { application_status: status }
+  const { data, error, isLoading, mutate } = useSWR<Job[]>(['/api/jobs', status], () => api.jobs.list({ limit: 100, ...params }).then(result => result.jobs), {
     refreshInterval: 10_000, // auto-refresh every 10s while pipeline runs
   })
 
