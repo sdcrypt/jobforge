@@ -77,4 +77,5 @@ class AgentEvent(Base):
     message: Mapped[str] = mapped_column(Text)
     extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

@@ -6,7 +6,7 @@
 #   postgres  PostgreSQL 16 database
 #   redis     Redis 7 (Celery broker)
 #   worker    Celery worker (background tasks)
-#   beat      Celery beat (scheduled search every 12h)
+#   beat      Celery beat (checks due runs and recovery every minute)
 #
 # Ollama runs on your HOST machine (not in Docker)
 # so it keeps Metal GPU acceleration on M1 Mac.
@@ -66,6 +66,12 @@ services:
     # Needed on Linux so host.docker.internal resolves (Mac Docker Desktop handles it automatically)
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
     restart: unless-stopped
 
   # ── PostgreSQL ───────────────────────────────────────────────────────────
@@ -104,13 +110,17 @@ services:
       REDIS_URL: redis://redis:6379/0
       LLM_BASE_URL: http://host.docker.internal:11434/v1
     depends_on:
-      - postgres
-      - redis
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      backend:
+        condition: service_healthy
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
 
-  # ── Celery Beat (scheduler — triggers search every 12h) ──────────────────
+  # ── Celery Beat (checks due schedules and run recovery every minute) ─────
   beat:
     build:
       context: ./backend
@@ -124,7 +134,10 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
     depends_on:
-      - redis
+      redis:
+        condition: service_started
+      backend:
+        condition: service_healthy
     restart: unless-stopped
 
   # ── Redis ────────────────────────────────────────────────────────────────
@@ -133,8 +146,13 @@ services:
     container_name: jobforge_redis
     ports:
       - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
     restart: unless-stopped
 
 volumes:
+  redis_data:
+    name: jobforge_redis_data
   postgres_data:
     name: jobforge_postgres_data

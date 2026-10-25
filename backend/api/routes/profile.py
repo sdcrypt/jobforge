@@ -1,13 +1,14 @@
 """Profile CRUD + resume upload/parse endpoints."""
 
 from pathlib import Path
+import base64
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
 from core.database import get_db
-from core.resume_parser import ResumeParser
 from models.profile import UserProfile
+from core.runs import enqueue_run, run_response
 
 router = APIRouter(prefix="/api/profile", tags=["profile"])
 
@@ -70,15 +71,15 @@ async def save_profile(data: ProfileCreate, db: AsyncSession = Depends(get_db)):
     return {"id": profile.id, "message": "Profile saved."}
 
 
-@router.post("/parse-resume")
+@router.post("/parse-resume", status_code=202)
 async def parse_resume(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Upload a PDF or DOCX resume.
-    Returns parsed profile fields — does NOT save automatically.
-    The frontend shows the result for user review, then calls POST /api/profile to save.
+    Queues parsing and returns a run ID. Parsed fields are available in the run's
+    result for user review and are never saved to the profile automatically.
     """
     # Validate extension
     ext = Path(file.filename or "").suffix.lower()
@@ -89,7 +90,7 @@ async def parse_resume(
         )
 
     # Read and size-check
-    content = await file.read()
+    content = await file.read(MAX_FILE_SIZE + 1)
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=400,
@@ -97,23 +98,5 @@ async def parse_resume(
         )
 
     # Parse
-    parser = ResumeParser(db=db)
-    try:
-        if ext == ".pdf":
-            parsed = await parser.parse_pdf(content)
-        else:
-            parsed = await parser.parse_docx(content)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=500, detail=str(e))
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Unexpected error parsing resume: {str(e)}",
-        )
-
-    return {
-        "parsed": parsed,
-        "message": "Resume parsed successfully. Review the fields below and click Save Profile.",
-    }
+    run, created = await enqueue_run(db, "resume_parse", {"extension": ext, "content": base64.b64encode(content).decode("ascii")})
+    return run_response(run, created)

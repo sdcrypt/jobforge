@@ -62,6 +62,7 @@ class RankAgent(BaseAgent):
             for job, score in zip(batch, scores):
                 if isinstance(score, Exception):
                     log.warning("rank.score_failed", job_id=job.id, error=str(score))
+                    await self.emit("error", f"Could not score {job.title}: {score}", {"job_id": job.id})
                 else:
                     all_scores.append({"job_id": job.id, **score})
 

@@ -197,31 +197,17 @@ export default function JobCard({ job, onRefresh }: Props) {
     setDocsReady(false)
     setError(null)
     try {
-      await api.applications.generateDocs(localJob.id)
-      await waitForDocs()
+      const queued = await api.applications.generateDocs(localJob.id)
+      await api.runs.wait(queued.run_id)
+      const ready = await api.applications.get(localJob.id)
+      setApplication(ready)
+      setDocsReady(Boolean(ready.one_pager_path))
       onRefresh?.()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to generate docs')
     } finally {
       setGenerating(false)
     }
-  }
-
-  async function waitForDocs() {
-    for (let i = 0; i < 90; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-      const app = await api.applications.get(localJob.id).catch(() => null)
-      if (!app) continue
-      if (app.document_status === 'ready' && app.one_pager_path) {
-        setApplication(app)
-        setDocsReady(true)
-        return
-      }
-      if (app.document_status === 'failed') {
-        throw new Error(app.document_error || 'Document generation failed. Please try again.')
-      }
-    }
-    throw new Error('Document generation is still running. Check the Agent Feed or try Preview again in a minute.')
   }
 
   async function dismiss() {
@@ -248,7 +234,7 @@ export default function JobCard({ job, onRefresh }: Props) {
         talking_points: result.talking_points,
         strengths:      result.strengths,
         gaps:           result.gaps,
-        researched_at:  new Date().toISOString(),
+        researched_at:  result.researched_at,
       }))
       setShowPanel(true)
       onRefresh?.()   // background refresh so list re-sorts by score
@@ -379,10 +365,10 @@ export default function JobCard({ job, onRefresh }: Props) {
 
         <button
           onClick={generateDocs}
-          disabled={generating}
+          disabled={generating || application?.document_status === 'generating'}
           className="text-xs px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-60 transition-colors"
         >
-          {generating ? 'Generating…' : '📄 Docs'}
+          {generating || application?.document_status === 'generating' ? 'Generating…' : '📄 Docs'}
         </button>
 
         {(docsReady || generating) && (

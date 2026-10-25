@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from api.routes import applications, jobs
 from core import database
+from core.runs import execute_run
 from core.application_lifecycle import TRANSITIONS, history_entry, transition
 from models.application import AgentEvent, Application
 from models.job import Job
@@ -25,6 +26,11 @@ class ApplicationTests(unittest.IsolatedAsyncioTestCase):
         self.session_patch = patch.object(database, "AsyncSessionLocal", self.sessions)
         self.engine_patch.start()
         self.session_patch.start()
+        self.dispatch_patch = patch("core.runs.dispatch_run", new=AsyncMock())
+        self.dispatch_patch.start()
+        self.publish_patch = patch("core.websocket.Redis.from_url")
+        redis_factory = self.publish_patch.start()
+        redis_factory.return_value.__aenter__.return_value.publish = AsyncMock()
         await database.init_db()
         app = FastAPI()
         app.include_router(applications.router)
@@ -40,6 +46,8 @@ class ApplicationTests(unittest.IsolatedAsyncioTestCase):
     async def asyncTearDown(self):
         await self.client.aclose()
         self.session_patch.stop()
+        self.dispatch_patch.stop()
+        self.publish_patch.stop()
         self.engine_patch.stop()
         await self.engine.dispose()
 
@@ -129,25 +137,30 @@ class ApplicationTests(unittest.IsolatedAsyncioTestCase):
         generated = {"one_pager_path": "/tmp/resume.pdf", "one_pager_html": "<p>Resume</p>", "cover_letter_path": "/tmp/letter.pdf", "cover_letter_text": "Letter"}
         with patch("agents.docgen.DocGenAgent.run", new=AsyncMock(return_value=generated)):
             response = await self.client.post(f"/api/applications/{self.job_id}/generate-docs")
+            self.assertEqual(response.json()["run"]["status"], "queued")
+            await execute_run(response.json()["run_id"])
         self.assertEqual(response.status_code, 202, response.text)
         ready = (await self.client.get(f"/api/applications/{self.job_id}")).json()
         self.assertEqual(ready["status"], "applied")
         self.assertEqual(ready["document_status"], "ready")
         self.assertEqual(ready["status_history"], applied["status_history"])
         with patch("agents.docgen.DocGenAgent.run", new=AsyncMock(side_effect=RuntimeError("Model unavailable"))):
-            await self.client.post(f"/api/applications/{self.job_id}/generate-docs")
+            queued = await self.client.post(f"/api/applications/{self.job_id}/generate-docs")
+            await execute_run(queued.json()["run_id"])
         failed = (await self.client.get(f"/api/applications/{self.job_id}")).json()
         self.assertEqual(failed["status"], "applied")
         self.assertEqual(failed["document_status"], "failed")
         self.assertEqual(failed["document_error"], "Model unavailable")
         self.assertEqual(failed["one_pager_path"], ready["one_pager_path"])
 
-    async def test_duplicate_document_requests_are_rejected(self):
+    async def test_duplicate_document_requests_share_the_existing_run(self):
         with patch.object(applications, "_run_docgen", new=AsyncMock()):
             first = await self.client.post(f"/api/applications/{self.job_id}/generate-docs")
             second = await self.client.post(f"/api/applications/{self.job_id}/generate-docs")
         self.assertEqual(first.status_code, 202)
-        self.assertEqual(second.status_code, 409)
+        self.assertEqual(second.status_code, 202)
+        self.assertEqual(first.json()["run_id"], second.json()["run_id"])
+        self.assertTrue(second.json()["duplicate"])
         application = (await self.client.get(f"/api/applications/{self.job_id}")).json()
         self.assertEqual(application["status"], "preparing")
         self.assertEqual(application["document_status"], "generating")

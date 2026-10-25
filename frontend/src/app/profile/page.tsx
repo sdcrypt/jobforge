@@ -56,6 +56,19 @@ export default function ProfilePage() {
     api.profile.get()
       .then((p: UserProfile) => applyProfile(p))
       .catch(() => { /* no profile yet — start blank */ })
+      .then(async () => {
+        const runId = new URLSearchParams(window.location.search).get('run')
+        if (!runId) return
+        try {
+          const run = await api.runs.get(runId)
+          if (run.kind === 'resume_parse' && run.status === 'succeeded' && run.result?.parsed) {
+            applyProfile(run.result.parsed as Partial<UserProfile>)
+            setUploadMsg('Imported resume restored. Review the fields and save your profile.')
+          }
+        } catch {
+          setUploadMsg('Could not restore the imported resume. Open Runs to check its status.')
+        }
+      })
       .finally(() => setLoading(false))
   }, [])
 

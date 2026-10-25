@@ -42,10 +42,10 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
 
         # SQLAlchemy create_all won't add columns to tables that already exist.
-        json_type = "JSONB" if "postgresql" in settings.database_url else "JSON"
+        json_type = "JSONB" if conn.dialect.name == "postgresql" else "JSON"
         datetime_type = (
             "TIMESTAMP WITHOUT TIME ZONE"
-            if "postgresql" in settings.database_url
+            if conn.dialect.name == "postgresql"
             else "DATETIME"
         )
         _new_columns = [
@@ -69,6 +69,7 @@ async def init_db():
             ("applications", "follow_up_at", datetime_type),
             ("applications", "follow_up_completed_at", datetime_type),
             ("applications", "status_history", json_type),
+            ("agent_events", "run_id", "VARCHAR(36)"),
         ]
         columns = await conn.run_sync(
             lambda sync_conn: {
@@ -136,6 +137,9 @@ async def init_db():
             ))
         await conn.execute(text(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_applications_job_id ON applications (job_id)"
+        ))
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS ix_agent_events_run_id ON agent_events (run_id)"
         ))
 
 

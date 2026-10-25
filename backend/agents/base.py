@@ -57,6 +57,7 @@ class BaseAgent(ABC):
     async def emit(self, status: str, message: str, data: dict | None = None):
         """Broadcast agent status to UI via WebSocket and persist to DB."""
         log.info("agent.event", agent=self.name, status=status, message=message)
+        from core.runs import current_run
 
         # Broadcast to all connected WebSocket clients (real-time UI feed)
         await ws_manager.emit_agent_event(
@@ -64,20 +65,9 @@ class BaseAgent(ABC):
             status=status,
             message=message,
             data=data,
+            job_id=self.job_id,
+            persist=self.db is not None or current_run.get() is not None,
         )
-
-        # Persist to DB for history
-        if self.db:
-            from models.application import AgentEvent
-            event = AgentEvent(
-                agent=self.name,
-                status=status,
-                message=message,
-                extra=data,
-                job_id=self.job_id,
-            )
-            self.db.add(event)
-            await self.db.flush()
 
     # ─── LLM calls ───────────────────────────────────────────────────────
 

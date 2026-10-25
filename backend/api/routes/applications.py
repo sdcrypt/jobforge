@@ -4,19 +4,21 @@ Application pipeline endpoints — generate docs, preview, download, apply, trac
 
 from pathlib import Path
 import structlog
-from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from core.database import get_db
 from core.config import settings
+from core.runs import ACTIVE_STATUSES, RunLost, commit_owned, enqueue_run, run_response
 from core.application_lifecycle import (
     ApplicationUpdate, StatusChange, TRANSITIONS, history_entry, transition,
 )
 from models.job import Job
 from models.profile import UserProfile
 from models.application import AgentEvent, Application
+from models.run import TaskRun
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
 log = structlog.get_logger()
@@ -27,7 +29,6 @@ log = structlog.get_logger()
 @router.post("/{job_id}/generate-docs", status_code=202)
 async def generate_docs(
     job_id: str,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -37,17 +38,14 @@ async def generate_docs(
     await _get_job(job_id, db)
     await _get_profile(db)
     app = await _get_or_create_application(job_id, db)
-    if app.document_status == "generating":
-        raise HTTPException(409, "Documents are already being generated for this job.")
     if app.status == "saved":
         transition(app, "preparing", "Started preparing application documents")
     app.document_status = "generating"
     app.document_error = None
+    run, created = await enqueue_run(db, "docgen", job_id=job_id)
     await db.commit()
-
-    background_tasks.add_task(_run_docgen, job_id)
     return {
-        "message": "DocGen started. Watch ws://localhost:8000/ws for progress.",
+        **run_response(run, created),
         "application_id": app.id,
         "preview_url": f"/api/applications/{job_id}/preview/one-pager",
     }
@@ -72,14 +70,17 @@ async def _run_docgen(job_id: str):
             app.cover_letter_text = result["cover_letter_text"]
             app.document_status = "ready"
             app.document_error = None
+        except RunLost:
+            await db.rollback()
+            raise
         except Exception as exc:
             await db.rollback()
             app = await _get_application(job_id, db)
             app.document_status = "failed"
             app.document_error = str(exc)[:2000]
-            await db.commit()
+            await commit_owned(db)
             raise
-        await db.commit()
+        await commit_owned(db)
 
 
 # ── Preview (HTML in browser) ─────────────────────────────────────────────────
@@ -147,7 +148,6 @@ async def download_cover_letter(job_id: str, db: AsyncSession = Depends(get_db))
 @router.post("/{job_id}/apply", status_code=202)
 async def start_apply(
     job_id: str,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_db),
 ):
     """Start the Apply Agent. Always pauses for user review before submitting."""
@@ -156,8 +156,8 @@ async def start_apply(
         raise HTTPException(400, "Generate documents first (POST /generate-docs).")
     if app.status not in ("saved", "preparing"):
         raise HTTPException(409, "This application has already progressed beyond preparation.")
-    background_tasks.add_task(_run_apply, job_id)
-    return {"message": "Apply Agent started. A browser window will open for your review."}
+    run, created = await enqueue_run(db, "apply", job_id=job_id, max_attempts=1)
+    return run_response(run, created)
 
 
 async def _run_apply(job_id: str):
@@ -171,7 +171,10 @@ async def _run_apply(job_id: str):
         result = await agent.run(job=job, profile=profile, application=app)
         if result["status"] == "filled":
             app.apply_notes = "Form filled; awaiting manual review and submission."
-        await db.commit()
+        await commit_owned(db)
+        if result.get("status") == "error":
+            raise RuntimeError(result.get("message", "Application assistance failed"))
+        return result
 
 
 # ── Status + listing ──────────────────────────────────────────────────────────
@@ -205,6 +208,11 @@ async def delete_application(job_id: str, db: AsyncSession = Depends(get_db)):
     if job is None:
         raise HTTPException(404, "Job not found")
     app = await _get_application(job_id, db, lock=True)
+    active = (await db.execute(select(TaskRun.id).where(
+        TaskRun.job_id == job_id, TaskRun.status.in_(ACTIVE_STATUSES)
+    ).limit(1))).first()
+    if active:
+        raise HTTPException(409, "This job has queued or running work. Wait for it to finish before deleting.")
     if app.document_status == "generating":
         raise HTTPException(409, "Documents are being generated. Wait for generation to finish before deleting this application.")
 
@@ -214,7 +222,11 @@ async def delete_application(job_id: str, db: AsyncSession = Depends(get_db)):
         .where(Application.id != app.id)
     )).all()
     shared_files = _document_files(path for pair in other_documents for path in pair)
-    await db.execute(delete(AgentEvent).where(AgentEvent.job_id == job_id))
+    related_run_ids = select(TaskRun.id).where(TaskRun.job_id == job_id)
+    await db.execute(delete(AgentEvent).where(or_(
+        AgentEvent.job_id == job_id, AgentEvent.run_id.in_(related_run_ids)
+    )))
+    await db.execute(delete(TaskRun).where(TaskRun.job_id == job_id))
     await db.delete(app)
     await db.flush()
     await db.delete(job)

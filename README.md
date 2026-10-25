@@ -142,6 +142,34 @@ Any document-cleanup failure is reported separately after the database deletion.
 
 Run backend tests with `docker compose exec backend python -m unittest discover -s tests -v`.
 
+### Reliable Runs
+- Pipeline search, standalone search/ranking/research, document generation, resume parsing, and application assistance execute in Celery workers. Requests return HTTP 202 with a persistent `run_id`.
+- **Runs** shows queued, running, retrying, succeeded, partially completed, and failed work, including stage progress, saved results, attempts, failure details, and related research tasks. Closing the browser does not interrupt work.
+- Pipeline stages commit useful work independently: cleanup → search → store → rank → research. A later failure does not discard already stored jobs or completed analyses. Ranking drains all pending batches rather than stopping at 50 jobs.
+- Active-work keys and atomic worker claims prevent duplicate runs and duplicate message execution. Pipeline, standalone search, and standalone ranking share a discovery lock; per-job work has its own locks.
+- Failed transient work retries up to three attempts by default, with increasing delays. Beat checks due retries every minute. **Retry run** creates a new linked run and lets you select 1–5 attempts. Validation failures stop immediately; browser application assistance never retries automatically.
+- Workers heartbeat every 15 seconds. After three minutes without a heartbeat, the scheduler records an interruption and retries within the attempt budget. Obsolete workers cannot commit application/database updates after losing ownership.
+- The configured `run_every_hours` is honored: `0` means manual only. Scheduled runs become due relative to the latest queued pipeline run for that configuration, or the configuration's creation time before its first run. Beat checks every minute and never overlaps active discovery work.
+- Runs are committed before queue publication. If Redis is unavailable, the run remains queued with a dispatch error; the scheduler retries publication when the broker returns. Redis uses append-only persistence in its own Docker volume.
+- Worker events are saved in the database and published through Redis to the API's WebSocket listener. The activity feed restores history on reconnect and also polls persisted events, so a missed live event does not erase progress.
+- Resume-import results can be reopened from Runs using **Review imported resume in Profile**. Parsing never saves the profile automatically; the uploaded bytes are cleared from the run payload after successful parsing.
+
+Rebuild all services after updating: `docker compose up -d --build`. The API adds
+the run-history tables and event index at startup. Keep **backend, worker, beat,
+PostgreSQL, and Redis** running: Beat handles scheduling, retry dispatch, and
+interruption recovery. Worker/Beat restarts are required to load changed task code.
+
+Run APIs: `GET /api/runs`, `GET /api/runs/{run_id}`,
+`GET /api/runs/events?run_id=...`, and `POST /api/runs/{run_id}/retry` with optional
+JSON `{ "max_attempts": 3 }`. Search inputs are snapshotted at queue time; retries
+reuse those inputs. Jobs and analyses already completed are retained and deduplicated.
+
+Tests use temporary SQLite databases by default. To exercise PostgreSQL locking,
+set `JOBFORGE_TEST_DATABASE_URL` to a disposable PostgreSQL database; the run tests
+create and remove their own schemas. Set `JOBFORGE_TEST_REDIS_URL` to an isolated
+Redis server to also run the real Celery worker/event-bridge integration test.
+Never use a production Redis broker for that integration test.
+
 ---
 
 ## Tech Stack

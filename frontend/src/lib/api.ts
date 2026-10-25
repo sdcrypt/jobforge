@@ -151,10 +151,56 @@ export interface Stats {
 }
 
 export interface AgentEventData {
+  id: string
+  run_id: string | null
+  created_at: string
   agent: string
   status: 'started' | 'thinking' | 'done' | 'error'
   message: string
   extra: Record<string, unknown>
+}
+
+export interface TaskRun {
+  label: string
+  children?: TaskRun[]
+  id: string
+  kind: string
+  status: 'queued' | 'running' | 'retrying' | 'succeeded' | 'partial' | 'failed'
+  job_id: string | null
+  config_id: string | null
+  parent_id: string | null
+  retry_of: string | null
+  trigger: string
+  stage: string
+  stages: { name: string; attempt: number; status: string; message: string; completed: number; total: number; error?: string }[]
+  result: Record<string, unknown> | null
+  error: string | null
+  error_type: string | null
+  dispatch_error: string | null
+  traceback?: string | null
+  attempts: number
+  max_attempts: number
+  next_retry_at: string | null
+  created_at: string
+  started_at: string | null
+  finished_at: string | null
+}
+
+export interface QueuedRun {
+  run_id: string
+  run: TaskRun
+  duplicate: boolean
+  message: string
+}
+
+async function waitForRun(runId: string): Promise<TaskRun> {
+  for (let attempt = 0; attempt < 300; attempt += 1) {
+    const run = await req<TaskRun>(`/api/runs/${runId}`)
+    if (run.status === 'succeeded' || run.status === 'partial') return run
+    if (run.status === 'failed') throw new Error(run.error || 'Task failed. Open Runs for details and retry.')
+    await new Promise(resolve => setTimeout(resolve, 3000))
+  }
+  throw new Error('Work is still queued or running. Open Runs to follow progress; it will continue after you leave this page.')
 }
 
 // ── Health ───────────────────────────────────────────────────────────────────
@@ -186,7 +232,9 @@ export const api = {
         const err = await res.json().catch(() => ({ detail: res.statusText }))
         throw new Error(err.detail || `HTTP ${res.status}`)
       }
-      return res.json()
+      const queued = await res.json() as QueuedRun
+      const completed = await waitForRun(queued.run_id)
+      return { parsed: completed.result?.parsed as Partial<UserProfile>, message: 'Resume parsed. Review the fields and save your profile.' }
     },
   },
 
@@ -202,7 +250,19 @@ export const api = {
 
   // ── Pipeline ────────────────────────────────────────────────────────────
   pipeline: {
-    run: () => req<{ message: string }>('/api/pipeline/run', { method: 'POST' }),
+    run: () => req<QueuedRun>('/api/pipeline/run', { method: 'POST' }),
+  },
+
+  runs: {
+    list: (params?: { kind?: string; status?: string; limit?: number; offset?: number }) => {
+      const query = new URLSearchParams()
+      Object.entries(params || {}).forEach(([key, value]) => { if (value !== undefined) query.set(key, String(value)) })
+      return req<{ runs: TaskRun[]; count: number }>(`/api/runs?${query}`)
+    },
+    get: (runId: string) => req<TaskRun>(`/api/runs/${runId}`),
+    events: (runId?: string) => req<{ events: AgentEventData[] }>(`/api/runs/events${runId ? `?run_id=${runId}&limit=200` : ''}`),
+    retry: (runId: string, maxAttempts = 3) => req<QueuedRun>(`/api/runs/${runId}/retry`, { method: 'POST', body: JSON.stringify({ max_attempts: maxAttempts }) }),
+    wait: waitForRun,
   },
 
   // ── Jobs ────────────────────────────────────────────────────────────────
@@ -219,11 +279,11 @@ export const api = {
     dismiss: (id: string) =>
       req<{ message: string }>(`/api/jobs/${id}/dismiss`, { method: 'PATCH' }),
     /** Run Research Agent — AI fit analysis against profile. Returns updated scores. */
-    research: (id: string) =>
-      req<{ message: string; job_id: string; fit_score: number | null; fit_summary: string | null; talking_points: string[] | null; strengths: string[] | null; gaps: string[] | null }>(
-        `/api/jobs/${id}/research`,
-        { method: 'POST' },
-      ),
+    research: async (id: string) => {
+      const queued = await req<QueuedRun>(`/api/jobs/${id}/research`, { method: 'POST' })
+      await waitForRun(queued.run_id)
+      return req<Job>(`/api/jobs/${id}`)
+    },
     clear: (portal?: string) => {
       const qs = portal ? `?portal=${portal}` : ''
       return req<{ message: string; deleted: number }>(`/api/jobs/clear${qs}`, { method: 'DELETE' })
@@ -244,7 +304,7 @@ export const api = {
     update: (jobId: string, data: Partial<ApplicationDetails>) =>
       req<Application>(`/api/applications/${jobId}`, { method: 'PATCH', body: JSON.stringify(data) }),
     generateDocs: (jobId: string) =>
-      req<{ message: string; application_id: string }>(`/api/applications/${jobId}/generate-docs`, {
+      req<QueuedRun & { application_id: string }>(`/api/applications/${jobId}/generate-docs`, {
         method: 'POST',
       }),
     updateStatus: (jobId: string, status: ApplicationStatus, expectedStatus: ApplicationStatus, note?: string) =>

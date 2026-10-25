@@ -6,6 +6,7 @@ Used by the API route and the Celery scheduled task.
 
 import asyncio
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import and_, delete, desc, func, or_, select
 import structlog
@@ -15,13 +16,15 @@ from models.job import Job
 from models.profile import UserProfile
 from models.search_config import SearchConfig
 from agents.search import SearchAgent
-from agents.rank import RankAgent
 from core.websocket import ws_manager
+from core.runs import commit_owned, stage
+from models.run import TaskRun
+from core.runs import ACTIVE_STATUSES
 
 log = structlog.get_logger()
 
 
-async def run_pipeline(db: AsyncSession) -> dict:
+async def run_pipeline(db: AsyncSession, config_data: dict | None = None, config_id: str | None = None) -> dict:
     """
     Full pipeline:
       1. Load SearchConfig + UserProfile from DB
@@ -40,13 +43,15 @@ async def run_pipeline(db: AsyncSession) -> dict:
         select(SearchConfig).where(SearchConfig.active == True).limit(1)
     )
     config = config_r.scalar_one_or_none()
+    if config_data is not None:
+        config = SimpleNamespace(**config_data)
 
     if not config:
         await ws_manager.emit_agent_event(
             "pipeline", "error",
             "No active SearchConfig found. Create one at POST /api/search-config"
         )
-        return {"error": "No search config found"}
+        raise ValueError("No active search configuration found.")
 
     profile_r = await db.execute(select(UserProfile).limit(1))
     profile = profile_r.scalar_one_or_none()
@@ -56,14 +61,19 @@ async def run_pipeline(db: AsyncSession) -> dict:
             "pipeline", "error",
             "No profile found. Create one at POST /api/profile"
         )
-        return {"error": "No profile found"}
+        raise ValueError("No profile found.")
 
     # Remove stale local rows before adding fresh results. Search agents already
     # request recent postings, but old rows can remain from earlier runs.
+    await stage("cleanup", "Removing stale untracked jobs")
     cleaned_count = await _cleanup_stale_jobs(db, config.posted_within_days)
+    await commit_owned(db)
+    await stage("cleanup", f"Removed {cleaned_count} stale jobs", cleaned_count, cleaned_count, done=True,
+                result={"old_jobs_removed": cleaned_count})
 
     # ── Step 1: Search ────────────────────────────────────────────────────
     search_agent = SearchAgent(db=db)
+    await stage("search", "Searching configured portals")
     raw_jobs = await search_agent.run(
         keywords=config.keywords,
         locations=config.locations,
@@ -74,7 +84,35 @@ async def run_pipeline(db: AsyncSession) -> dict:
         linkedin_pages=getattr(config, "linkedin_pages", 1),
     )
 
-    # ── Step 2: Store (deduplicate) ───────────────────────────────────────
+    await stage("search", f"Found {len(raw_jobs)} results", len(raw_jobs), len(raw_jobs), done=True)
+    await stage("store", "Saving new jobs and skipping duplicates")
+    new_count = await store_jobs(db, raw_jobs)
+    await commit_owned(db)
+    await stage("store", f"Saved {new_count} new jobs", new_count, new_count, done=True,
+                result={"new_jobs_found": new_count})
+
+    from workers.handlers import rank_pending
+    ranked_count = await rank_pending(db, profile)
+    stored_config = await db.get(SearchConfig, config_id) if config_id else None
+    if stored_config:
+        stored_config.last_run_at = datetime.utcnow()
+        stored_config.last_run_found = new_count
+    elif isinstance(config, SearchConfig):
+        config.last_run_at = datetime.utcnow()
+        config.last_run_found = new_count
+    await commit_owned(db)
+    summary = {"new_jobs_found": new_count, "jobs_ranked": ranked_count,
+               "old_jobs_removed": cleaned_count, "portals_searched": config.portals,
+               "keywords": config.keywords}
+    auto_n = getattr(config, "auto_research_top_n", 5)
+    await stage("research", f"Researching up to {auto_n} top matches")
+    summary["jobs_researched"] = await _auto_research(profile, auto_n) if auto_n > 0 else 0
+    await stage("research", f"Research complete: {summary['jobs_researched']} jobs",
+                summary["jobs_researched"], summary["jobs_researched"], done=True, result=summary)
+    return summary
+
+
+async def store_jobs(db: AsyncSession, raw_jobs: list[dict]) -> int:
     # Primary dedup: exact URL match (DB unique constraint)
     # Secondary dedup: same company + same title (catches URL variants / LinkedIn
     #   returning the same job for different keyword/location combos)
@@ -107,65 +145,7 @@ async def run_pipeline(db: AsyncSession) -> dict:
 
     await db.flush()
 
-    await ws_manager.emit_agent_event(
-        "pipeline", "thinking",
-        f"Stored {new_count} new jobs. Starting ranking...",
-        {"new_jobs": new_count},
-    )
-
-    # ── Step 3: Rank all unranked jobs ────────────────────────────────────
-    unranked_r = await db.execute(
-        select(Job).where(Job.fit_score == None).limit(50)
-    )
-    unranked = unranked_r.scalars().all()
-
-    ranked_count = 0
-    if unranked:
-        rank_agent = RankAgent(db=db)
-        scores = await rank_agent.run(jobs=unranked, profile=profile)
-
-        for score in scores:
-            job_r = await db.execute(select(Job).where(Job.id == score["job_id"]))
-            job = job_r.scalar_one_or_none()
-            if job:
-                job.fit_score     = score.get("overall")
-                job.tech_score    = score.get("tech_score")
-                job.exp_score     = score.get("exp_score")
-                job.location_score = score.get("location_score")
-                job.growth_score  = score.get("growth_score")
-                job.strengths     = score.get("strengths", [])
-                job.gaps          = score.get("gaps", [])
-                job.status        = "ranked"
-                ranked_count += 1
-
-    # ── Update config last_run ────────────────────────────────────────────
-    config.last_run_at = __import__("datetime").datetime.utcnow()
-    config.last_run_found = new_count
-
-    await db.commit()
-
-    summary = {
-        "new_jobs_found": new_count,
-        "jobs_ranked": ranked_count,
-        "old_jobs_removed": cleaned_count,
-        "portals_searched": config.portals,
-        "keywords": config.keywords,
-    }
-
-    await ws_manager.emit_agent_event(
-        "pipeline", "done",
-        f"Pipeline complete — {new_count} new jobs, {ranked_count} ranked, {cleaned_count} old removed.",
-        summary,
-    )
-
-    # ── Step 4: Auto-research top N ───────────────────────────────────────
-    # Runs *after* the "done" event so the UI already shows all jobs.
-    # Research fills in progressively — the frontend auto-refreshes every 10s.
-    auto_n = getattr(config, "auto_research_top_n", 5)
-    if auto_n > 0 and profile:
-        await _auto_research(profile, auto_n)
-
-    return summary
+    return new_count
 
 
 async def _cleanup_stale_jobs(db: AsyncSession, posted_within_days: int) -> int:
@@ -188,6 +168,9 @@ async def _cleanup_stale_jobs(db: AsyncSession, posted_within_days: int) -> int:
         "rejected",
     }
     protected_application_job_ids = select(Application.job_id)
+    protected_run_job_ids = select(TaskRun.job_id).where(
+        TaskRun.job_id != None, TaskRun.status.in_(ACTIVE_STATUSES)
+    )
 
     stale_job_ids = select(Job.id).where(
         or_(
@@ -196,6 +179,7 @@ async def _cleanup_stale_jobs(db: AsyncSession, posted_within_days: int) -> int:
         ),
         Job.status.notin_(protected_job_statuses),
         Job.id.notin_(protected_application_job_ids),
+        Job.id.notin_(protected_run_job_ids),
     )
 
     stale_ids = [row[0] for row in (await db.execute(stale_job_ids)).all()]
@@ -206,50 +190,40 @@ async def _cleanup_stale_jobs(db: AsyncSession, posted_within_days: int) -> int:
     await db.flush()
 
     removed = result.rowcount or 0
-    await ws_manager.emit_agent_event(
-        "pipeline",
-        "thinking",
-        f"Removed {removed} stale jobs older than {days} days.",
-        {"removed": removed, "posted_within_days": days},
-    )
     return removed
 
 
-async def _auto_research(profile, top_n: int) -> None:
+async def _auto_research(profile, top_n: int) -> int:
     """
     Background step: research the top N unresearched jobs by fit_score.
     Runs 2 jobs concurrently to keep Ollama load manageable.
     Uses fresh DB sessions per job to avoid long-held transactions.
     """
     from core.database import AsyncSessionLocal
-    from agents.research import ResearchAgent
-
-    # Build profile dict once
-    profile_dict = {
-        "full_name":         profile.full_name,
-        "headline":          profile.headline,
-        "summary":           profile.summary,
-        "skills":            profile.skills or [],
-        "experience":        profile.experience or [],
-        "education":         profile.education or [],
-        "target_roles":      profile.target_roles or [],
-        "remote_preference": profile.remote_preference,
-    }
+    from core.runs import current_run, enqueue_run, execute_run
 
     # Find top N jobs that haven't been researched yet, ordered by fit_score
     async with AsyncSessionLocal() as db:
-        result = await db.execute(
-            select(Job)
-            .where(Job.researched_at == None)   # noqa: E711
-            .where(Job.status != "dismissed")
-            .order_by(desc(Job.fit_score))
-            .limit(top_n)
-        )
+        context = current_run.get()
+        parent = await db.get(TaskRun, context[0]) if context else None
+        targets = (parent.result or {}).get("research_job_ids") if parent else None
+        query = select(Job).where(Job.status != "dismissed", Job.fit_score != None).order_by(desc(Job.fit_score))
+        if targets is None:
+            query = query.where(Job.researched_at == None).limit(top_n)
+        else:
+            query = query.where(Job.id.in_(targets))
+        result = await db.execute(query)
         jobs_to_research = result.scalars().all()
-        job_ids = [j.id for j in jobs_to_research]
+        target_ids = targets if targets is not None else [job.id for job in jobs_to_research]
+        job_ids = [job.id for job in jobs_to_research if job.researched_at is None]
+        already_completed = len(jobs_to_research) - len(job_ids)
+        total = len(jobs_to_research)
+
+    await stage("research", f"Researching {total} selected matches", already_completed, total,
+                result={"research_job_ids": target_ids, "jobs_researched": already_completed})
 
     if not job_ids:
-        return
+        return already_completed
 
     await ws_manager.emit_agent_event(
         "research", "started",
@@ -258,28 +232,41 @@ async def _auto_research(profile, top_n: int) -> None:
     )
 
     sem = asyncio.Semaphore(2)   # 2 concurrent — keeps Ollama comfortable
-    completed = 0
+    completed = already_completed
+    failed = []
 
     async def research_one(job_id: str) -> None:
         nonlocal completed
         async with sem:
             try:
                 async with AsyncSessionLocal() as research_db:
-                    agent = ResearchAgent(db=research_db, job_id=job_id)
-                    await agent.run(job_id=job_id, profile=profile_dict)
+                    context = current_run.get()
+                    child, _created = await enqueue_run(
+                        research_db, "research", job_id=job_id, dispatch=False,
+                        parent_id=context[0] if context else None, trigger="pipeline", max_attempts=1,
+                    )
+                outcome = await execute_run(child.id)
+                if outcome not in ("succeeded", "partial"):
+                    raise RuntimeError(f"Research run {child.id} {outcome}")
                 completed += 1
+                await stage("research", f"Researched {completed}/{total} jobs", completed, total,
+                            result={"jobs_researched": completed})
                 await ws_manager.emit_agent_event(
                     "research", "thinking",
-                    f"Researched {completed}/{len(job_ids)} jobs…",
-                    {"completed": completed, "total": len(job_ids)},
+                    f"Researched {completed}/{total} jobs…",
+                    {"completed": completed, "total": total},
                 )
             except Exception as e:
                 log.warning("pipeline.auto_research_failed", job_id=job_id, error=str(e))
+                failed.append(str(e))
 
     await asyncio.gather(*[research_one(jid) for jid in job_ids], return_exceptions=True)
 
     await ws_manager.emit_agent_event(
         "research", "done",
-        f"Auto-research complete — {completed}/{len(job_ids)} jobs analysed.",
-        {"completed": completed, "total": len(job_ids)},
+        f"Auto-research complete — {completed}/{total} jobs analysed.",
+        {"completed": completed, "total": total},
     )
+    if failed:
+        raise RuntimeError(f"{len(failed)} job research tasks failed: {failed[0]}")
+    return completed

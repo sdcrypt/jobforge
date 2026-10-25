@@ -5,33 +5,35 @@ JobForge — Celery Tasks
 import asyncio
 import sys
 from pathlib import Path
+
+APP_DIR = str(Path(__file__).resolve().parents[1])
+
 from workers.celery_app import celery_app
-import structlog
 
-log = structlog.get_logger()
-
-APP_DIR = Path(__file__).resolve().parents[1]
-if str(APP_DIR) not in sys.path:
-    sys.path.insert(0, str(APP_DIR))
+_runner = None
 
 
-@celery_app.task(name="workers.tasks.run_search_pipeline", bind=True, max_retries=2)
-def run_search_pipeline(self):
-    """
-    Scheduled task: runs full Search → Store → Rank pipeline.
-    Triggered every 12 hours by Celery Beat.
-    Can also be triggered manually: run_search_pipeline.delay()
-    """
-    try:
-        asyncio.run(_async_pipeline())
-    except Exception as exc:
-        log.error("task.pipeline_failed", error=str(exc))
-        raise self.retry(exc=exc, countdown=60)
+def ensure_app_path():
+    if APP_DIR not in sys.path:
+        sys.path.insert(0, APP_DIR)
 
 
-async def _async_pipeline():
-    from core.database import AsyncSessionLocal
-    from agents.pipeline import run_pipeline
-    async with AsyncSessionLocal() as db:
-        result = await run_pipeline(db)
-        log.info("task.pipeline_complete", **result)
+def run_async(coroutine):
+    global _runner
+    if _runner is None:
+        _runner = asyncio.Runner()
+    return _runner.run(coroutine)
+
+
+@celery_app.task(name="workers.tasks.execute_run", acks_late=True, reject_on_worker_lost=True)
+def execute_run(run_id: str):
+    ensure_app_path()
+    from core.runs import execute_run as execute
+    return run_async(execute(run_id))
+
+
+@celery_app.task(name="workers.tasks.maintain_runs")
+def maintain_runs():
+    ensure_app_path()
+    from workers.scheduler import tick
+    return run_async(tick())

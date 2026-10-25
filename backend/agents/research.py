@@ -16,6 +16,7 @@ from sqlalchemy import select
 
 from agents.base import BaseAgent
 from core.config import settings
+from core.runs import commit_owned
 from models.job import Job
 import structlog
 
@@ -81,7 +82,7 @@ class ResearchAgent(BaseAgent):
         if description and not job.description:
             job.description = description[:4000]
 
-        await self.db.commit()
+        await commit_owned(self.db)
         await self.db.refresh(job)
 
         score = job.fit_score or 0
@@ -217,6 +218,9 @@ Be specific — reference actual skills and experiences from the profile vs the 
             result = await self.chat_json(
                 [self.system(system_msg), self.user(user_msg)]
             )
+            required = {"fit_score", "tech_score", "exp_score", "location_score", "growth_score", "strengths", "gaps", "fit_summary", "talking_points"}
+            if required - result.keys():
+                raise ValueError("AI analysis omitted required fields.")
             # Clamp all score fields to 0–100
             for field in ("fit_score", "tech_score", "exp_score", "location_score", "growth_score"):
                 if field in result:
@@ -224,11 +228,4 @@ Be specific — reference actual skills and experiences from the profile vs the 
             return result
         except Exception as e:
             log.warning("research.llm_failed", error=str(e))
-            return {
-                "fit_score": 50.0, "tech_score": 50.0, "exp_score": 50.0,
-                "location_score": 50.0, "growth_score": 50.0,
-                "strengths": [],
-                "gaps": ["Analysis failed — check Ollama is running"],
-                "fit_summary": "Could not complete AI analysis. Make sure Ollama is running.",
-                "talking_points": [],
-            }
+            raise RuntimeError(f"AI research failed: {e}") from e

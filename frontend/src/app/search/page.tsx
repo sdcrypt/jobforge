@@ -1,7 +1,10 @@
 'use client'
 
 import { useState, useEffect, FormEvent } from 'react'
+import Link from 'next/link'
 import { api, SearchConfig } from '@/lib/api'
+import { usePipelineRun } from '@/hooks/usePipelineRun'
+import PipelineStatus from '@/components/agents/PipelineStatus'
 
 const PORTALS: { id: string; label: string; note: string }[] = [
   { id: 'jobleads',       label: 'JobLeads',             note: 'Public listings' },
@@ -29,6 +32,8 @@ export default function SearchPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
+  const { activeRun, refreshRuns } = usePipelineRun()
+  const pipelineBusy = running || Boolean(activeRun)
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
 
   // Raw string state for comma-separated fields
@@ -82,7 +87,8 @@ export default function SearchPage() {
     try {
       await api.searchConfig.save(buildPayload())
       const res = await api.pipeline.run()
-      setMsg({ ok: true, text: 'Search config saved and pipeline started — check Jobs page for results' })
+      await refreshRuns()
+      setMsg({ ok: true, text: res.message })
     } catch (err: unknown) {
       setMsg({ ok: false, text: err instanceof Error ? err.message : 'Pipeline failed' })
     } finally {
@@ -112,6 +118,7 @@ export default function SearchPage() {
 
   return (
     <div className="max-w-xl mx-auto">
+      <PipelineStatus />
       <h1 className="text-2xl font-bold text-slate-900 mb-1">Search Config</h1>
       <p className="text-slate-500 text-sm mb-6">
         Configure what the Search Agent looks for. Save, then run the pipeline.
@@ -199,11 +206,12 @@ export default function SearchPage() {
               <input
                 type="number"
                 className="input"
-                min={1}
-                max={72}
+                min={0}
+                max={8760}
                 value={form.run_every_hours ?? 12}
                 onChange={(e) => setForm((f) => ({ ...f, run_every_hours: Number(e.target.value) }))}
               />
+              <p className="mt-1 text-xs text-slate-500">Use 0 for manual runs only. Scheduled work is checked every minute.</p>
             </div>
           </div>
           <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
@@ -338,16 +346,20 @@ export default function SearchPage() {
           <button
             type="button"
             onClick={handleRunPipeline}
-            disabled={running}
+            disabled={pipelineBusy}
             className="flex-1 py-2.5 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 disabled:opacity-60 transition-colors flex items-center justify-center gap-2"
           >
-            {running ? (
-              <><span className="animate-spin">⚙️</span> Running…</>
+            {pipelineBusy ? (
+              <><span className="animate-spin">⚙️</span> {activeRun?.status === 'queued' ? 'Queued…' : activeRun?.status === 'retrying' ? 'Retry scheduled…' : running ? 'Queueing…' : 'Running…'}</>
             ) : (
               '🚀 Run Now'
             )}
           </button>
         </div>
+        {activeRun && <p role="status" className="text-sm text-slate-600">
+          {activeRun.status === 'queued' ? 'Waiting for a worker to start this run.' : `Current stage: ${activeRun.stage}.`}
+          {' '}<Link href={`/runs?run=${activeRun.id}`} className="text-brand-700 underline">View run progress</Link>
+        </p>}
       </form>
     </div>
   )

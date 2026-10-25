@@ -10,7 +10,6 @@ Start scheduler (for periodic tasks):
 """
 
 from celery import Celery
-from celery.schedules import crontab
 from core.config import settings
 
 celery_app = Celery(
@@ -26,11 +25,18 @@ celery_app.conf.update(
     accept_content=["json"],
     timezone="UTC",
     enable_utc=True,
+    worker_prefetch_multiplier=1,
+    broker_connection_retry_on_startup=True,
+    broker_transport_options={"visibility_timeout": 3600},
+    task_soft_time_limit=3300,
+    task_time_limit=3600,
+    task_publish_retry=False,
+    beat_schedule_filename="/tmp/jobforge-celerybeat-schedule",
     # Scheduled tasks
     beat_schedule={
-        "search-pipeline-every-12h": {
-            "task": "workers.tasks.run_search_pipeline",
-            "schedule": crontab(minute=0, hour="*/12"),  # every 12 hours
+        "maintain-runs-every-minute": {
+            "task": "workers.tasks.maintain_runs",
+            "schedule": 60.0,
         },
     },
 )

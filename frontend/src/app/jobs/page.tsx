@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { useJobs } from '@/hooks/useJobs'
 import JobCard from '@/components/jobs/JobCard'
 import { api } from '@/lib/api'
+import { usePipelineRun } from '@/hooks/usePipelineRun'
+import PipelineStatus from '@/components/agents/PipelineStatus'
 
 const STATUS_TABS = ['all', 'new', 'ranked', 'saved', 'preparing', 'applied', 'interviewing', 'offer', 'rejected'] as const
 type StatusTab = typeof STATUS_TABS[number]
@@ -13,6 +15,8 @@ export default function JobsPage() {
   const { jobs, isLoading, error, refresh } = useJobs(activeTab)
   const [minScore, setMinScore] = useState(0)
   const [runningPipeline, setRunningPipeline] = useState(false)
+  const { activeRun, refreshRuns } = usePipelineRun()
+  const pipelineBusy = runningPipeline || Boolean(activeRun)
   const [pipelineMsg, setPipelineMsg] = useState<string | null>(null)
   const [clearing, setClearing] = useState(false)
 
@@ -25,6 +29,7 @@ export default function JobsPage() {
     setPipelineMsg(null)
     try {
       const res = await api.pipeline.run()
+      await refreshRuns()
       setPipelineMsg(res.message)
       setTimeout(() => {
         refresh()
@@ -53,6 +58,7 @@ export default function JobsPage() {
 
   return (
     <div className="max-w-5xl mx-auto">
+      <PipelineStatus />
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
@@ -72,10 +78,10 @@ export default function JobsPage() {
           </button>
           <button
             onClick={runPipeline}
-            disabled={runningPipeline}
+            disabled={pipelineBusy}
             className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm font-medium hover:bg-brand-700 disabled:opacity-60 transition-colors flex items-center gap-2"
           >
-            {runningPipeline ? (
+            {pipelineBusy ? (
               <><span className="animate-spin">⚙️</span> Running…</>
             ) : (
               '🚀 Run Pipeline'

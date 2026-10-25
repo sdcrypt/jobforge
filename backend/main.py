@@ -4,6 +4,7 @@ Run: uvicorn main:app --reload --port 8000
 """
 
 import structlog
+import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.database import init_db
 from core.websocket import ws_manager
-from api.routes import health, profile, jobs, applications
+from api.routes import health, profile, jobs, applications, runs
 from api.routes.search_config import router as search_config_router, pipeline_router
 
 log = structlog.get_logger()
@@ -23,7 +24,12 @@ async def lifespan(app: FastAPI):
     log.info("jobforge.startup", llm=settings.llm_base_url, model=settings.llm_model_smart)
     await init_db()
     log.info("jobforge.db_ready")
-    yield
+    listener = asyncio.create_task(ws_manager.listen())
+    try:
+        yield
+    finally:
+        listener.cancel()
+        await asyncio.gather(listener, return_exceptions=True)
     log.info("jobforge.shutdown")
 
 
@@ -50,6 +56,7 @@ app.include_router(jobs.router)
 app.include_router(applications.router)
 app.include_router(search_config_router)
 app.include_router(pipeline_router)
+app.include_router(runs.router)
 
 
 # ─── WebSocket — real-time agent activity feed ───────────────────────────────

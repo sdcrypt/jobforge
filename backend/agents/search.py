@@ -108,6 +108,7 @@ class SearchAgent(BaseAgent):
         for batch in results:
             if isinstance(batch, Exception):
                 log.warning("search.batch_error", error=str(batch))
+                await self.emit("error", f"A portal search failed: {batch}")
                 continue
             for job in batch:
                 url = job.get("url", "")
@@ -155,6 +156,7 @@ class SearchAgent(BaseAgent):
                 return []
         except Exception as e:
             log.warning("search.portal_error", portal=portal, error=str(e))
+            await self.emit("error", f"{portal} search failed: {e}", {"portal": portal})
             return []
 
     # ═══════════════════════════════════════════════════════════════════════════
@@ -254,10 +256,12 @@ class SearchAgent(BaseAgent):
                 resp = await client.get("https://remoteok.com/api")
                 if resp.status_code != 200:
                     log.warning("search.remoteok_http", status=resp.status_code)
+                    await self.emit("error", f"RemoteOK returned HTTP {resp.status_code}", {"portal": "remoteok"})
                     return []
                 data = resp.json()
         except Exception as e:
             log.warning("search.remoteok_error", error=str(e))
+            await self.emit("error", f"RemoteOK failed: {e}", {"portal": "remoteok"})
             return []
 
         # First element is a legal notice — skip non-job entries
@@ -384,6 +388,7 @@ class SearchAgent(BaseAgent):
                     params={"tags": "ask_hn,who_is_hiring", "hitsPerPage": 1},
                 )
                 if r1.status_code != 200:
+                    await self.emit("error", f"Hacker News returned HTTP {r1.status_code}", {"portal": "hackernews"})
                     return []
                 hits = r1.json().get("hits", [])
                 if not hits:
@@ -403,11 +408,13 @@ class SearchAgent(BaseAgent):
                     },
                 )
                 if r2.status_code != 200:
+                    await self.emit("error", f"Hacker News returned HTTP {r2.status_code}", {"portal": "hackernews"})
                     return []
 
                 comment_hits = r2.json().get("hits", [])
         except Exception as e:
             log.warning("search.hackernews_error", error=str(e))
+            await self.emit("error", f"Hacker News failed: {e}", {"portal": "hackernews"})
             return []
 
         jobs = []
@@ -464,7 +471,9 @@ class SearchAgent(BaseAgent):
                 if resp.status_code == 200:
                     return resp.text
                 log.warning("search.http_error", url=url, status=resp.status_code)
+                await self.emit("error", f"Job portal returned HTTP {resp.status_code}", {"url": url})
                 return None
         except Exception as e:
             log.warning("search.fetch_failed", url=url, error=str(e))
+            await self.emit("error", f"Job portal request failed: {e}", {"url": url})
             return None
