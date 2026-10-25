@@ -240,6 +240,7 @@ export const api = {
     list: () => req<{ applications: Application[]; count: number }>('/api/applications'),
     get: (jobId: string) => req<Application>(`/api/applications/${jobId}`),
     save: (jobId: string) => req<Application>(`/api/applications/${jobId}`, { method: 'PUT' }),
+    remove: (jobId: string) => req<{ message: string; cleanup_warning: string | null }>(`/api/applications/${jobId}`, { method: 'DELETE' }),
     update: (jobId: string, data: Partial<ApplicationDetails>) =>
       req<Application>(`/api/applications/${jobId}`, { method: 'PATCH', body: JSON.stringify(data) }),
     generateDocs: (jobId: string) =>

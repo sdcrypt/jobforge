@@ -1,5 +1,7 @@
 import unittest
 from datetime import datetime, timedelta
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import AsyncMock, patch
 
 from fastapi import FastAPI
@@ -10,7 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from api.routes import applications, jobs
 from core import database
 from core.application_lifecycle import TRANSITIONS, history_entry, transition
-from models.application import Application
+from models.application import AgentEvent, Application
 from models.job import Job
 from models.profile import UserProfile
 
@@ -173,6 +175,101 @@ class ApplicationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(applied.json()["count"], 1)
         saved = await self.client.get("/api/jobs?application_status=saved")
         self.assertEqual(saved.json()["count"], 0)
+
+    async def test_delete_removes_application_job_and_events_but_preserves_other_records(self):
+        await self.save()
+        await self.move("applied", "saved")
+        await self.move("offer", "applied")
+        await self.move("accepted", "offer")
+        async with self.sessions() as session:
+            session.add(AgentEvent(agent="docgen", status="done", message="Generated documents", job_id=self.job_id))
+            session.add(AgentEvent(agent="search", status="done", message="Search complete"))
+            other = Job(title="Other", company="Other", portal="linkedin", url="https://example.com/other")
+            session.add(other)
+            await session.flush()
+            session.add(Application(job_id=other.id, status="saved"))
+            await session.commit()
+            other_id = other.id
+        response = await self.client.delete(f"/api/applications/{self.job_id}")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIsNone(response.json()["cleanup_warning"])
+        self.assertEqual((await self.client.get(f"/api/applications/{self.job_id}")).status_code, 404)
+        self.assertEqual((await self.client.get(f"/api/jobs/{self.job_id}")).status_code, 404)
+        self.assertEqual((await self.client.get("/api/applications")).json()["count"], 1)
+        async with self.sessions() as session:
+            events = (await session.execute(select(AgentEvent))).scalars().all()
+            self.assertEqual(len(events), 1)
+            self.assertIsNone(events[0].job_id)
+            self.assertIsNotNone(await session.get(Job, other_id))
+            self.assertIsNotNone((await session.execute(select(UserProfile))).scalar_one_or_none())
+
+    async def test_delete_missing_application_does_not_remove_untracked_job(self):
+        self.assertEqual((await self.client.delete("/api/applications/missing")).status_code, 404)
+        self.assertEqual((await self.client.delete(f"/api/applications/{self.job_id}")).status_code, 404)
+        self.assertEqual((await self.client.get(f"/api/jobs/{self.job_id}")).status_code, 200)
+
+    async def test_delete_waits_for_document_generation(self):
+        await self.save()
+        async with self.sessions() as session:
+            application = (await session.execute(select(Application))).scalar_one()
+            application.document_status = "generating"
+            await session.commit()
+        response = await self.client.delete(f"/api/applications/{self.job_id}")
+        self.assertEqual(response.status_code, 409, response.text)
+        self.assertEqual((await self.client.get(f"/api/applications/{self.job_id}")).status_code, 200)
+        self.assertEqual((await self.client.get(f"/api/jobs/{self.job_id}")).status_code, 200)
+
+    async def test_delete_removes_generated_pdf_and_html_files(self):
+        await self.save()
+        with TemporaryDirectory() as directory:
+            documents = Path(directory)
+            files = [documents / name for name in ("resume.pdf", "resume.html", "letter.pdf", "letter.html")]
+            for path in files:
+                path.write_text("test document")
+            async with self.sessions() as session:
+                application = (await session.execute(select(Application))).scalar_one()
+                application.one_pager_path = str(documents / "resume.pdf")
+                application.cover_letter_path = str(documents / "letter.html")
+                await session.commit()
+            with patch.object(applications.settings, "documents_dir", directory):
+                response = await self.client.delete(f"/api/applications/{self.job_id}")
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertTrue(all(not path.exists() for path in files))
+
+    async def test_delete_preserves_shared_documents_and_files_outside_documents_directory(self):
+        await self.save()
+        with TemporaryDirectory() as directory, TemporaryDirectory() as outside_directory:
+            shared_pdf = Path(directory) / "shared.pdf"
+            shared_html = shared_pdf.with_suffix(".html")
+            outside_file = Path(outside_directory) / "private.pdf"
+            for path in (shared_pdf, shared_html, outside_file):
+                path.write_text("keep this file")
+            async with self.sessions() as session:
+                application = (await session.execute(select(Application))).scalar_one()
+                application.one_pager_path = str(shared_pdf)
+                application.cover_letter_path = str(outside_file)
+                other = Job(title="Other", company="Other", portal="linkedin", url="https://example.com/shared")
+                session.add(other)
+                await session.flush()
+                session.add(Application(job_id=other.id, one_pager_path=str(shared_html)))
+                await session.commit()
+            with patch.object(applications.settings, "documents_dir", directory):
+                response = await self.client.delete(f"/api/applications/{self.job_id}")
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertTrue(all(path.exists() for path in (shared_pdf, shared_html, outside_file)))
+
+    async def test_delete_reports_file_cleanup_errors_without_restoring_application(self):
+        await self.save()
+        with TemporaryDirectory() as directory:
+            async with self.sessions() as session:
+                application = (await session.execute(select(Application))).scalar_one()
+                application.one_pager_path = str(Path(directory) / "resume.pdf")
+                await session.commit()
+            with patch.object(applications.settings, "documents_dir", directory), patch.object(Path, "unlink", side_effect=PermissionError("File is locked")):
+                response = await self.client.delete(f"/api/applications/{self.job_id}")
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertIsNotNone(response.json()["cleanup_warning"])
+            self.assertEqual((await self.client.get(f"/api/jobs/{self.job_id}")).status_code, 404)
 
     async def test_all_transition_rules(self):
         for previous, allowed in TRANSITIONS.items():

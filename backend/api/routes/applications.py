@@ -3,20 +3,23 @@ Application pipeline endpoints — generate docs, preview, download, apply, trac
 """
 
 from pathlib import Path
+import structlog
 from fastapi import APIRouter, Depends, BackgroundTasks, HTTPException
 from fastapi.responses import HTMLResponse, FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from core.database import get_db
+from core.config import settings
 from core.application_lifecycle import (
     ApplicationUpdate, StatusChange, TRANSITIONS, history_entry, transition,
 )
 from models.job import Job
 from models.profile import UserProfile
-from models.application import Application
+from models.application import AgentEvent, Application
 
 router = APIRouter(prefix="/api/applications", tags=["applications"])
+log = structlog.get_logger()
 
 
 # ── Generate docs ─────────────────────────────────────────────────────────────
@@ -195,6 +198,41 @@ async def save_application(job_id: str, db: AsyncSession = Depends(get_db)):
     return _serialize(app, await _get_job(job_id, db))
 
 
+@router.delete("/{job_id}")
+async def delete_application(job_id: str, db: AsyncSession = Depends(get_db)):
+    job_result = await db.execute(select(Job).where(Job.id == job_id).with_for_update())
+    job = job_result.scalar_one_or_none()
+    if job is None:
+        raise HTTPException(404, "Job not found")
+    app = await _get_application(job_id, db, lock=True)
+    if app.document_status == "generating":
+        raise HTTPException(409, "Documents are being generated. Wait for generation to finish before deleting this application.")
+
+    files = _document_files((app.one_pager_path, app.cover_letter_path))
+    other_documents = (await db.execute(
+        select(Application.one_pager_path, Application.cover_letter_path)
+        .where(Application.id != app.id)
+    )).all()
+    shared_files = _document_files(path for pair in other_documents for path in pair)
+    await db.execute(delete(AgentEvent).where(AgentEvent.job_id == job_id))
+    await db.delete(app)
+    await db.flush()
+    await db.delete(job)
+    await db.commit()
+
+    cleanup_failed = False
+    for path in files - shared_files:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            cleanup_failed = True
+            log.warning("application.document_cleanup_failed", job_id=job_id, error=str(exc))
+    return {
+        "message": "Application and job listing permanently deleted.",
+        "cleanup_warning": "Some document files could not be removed from disk." if cleanup_failed else None,
+    }
+
+
 @router.patch("/{job_id}")
 async def update_application(
     job_id: str, data: ApplicationUpdate, db: AsyncSession = Depends(get_db),
@@ -298,3 +336,16 @@ def _serialize(app: Application, job: Job) -> dict:
     }
     values["allowed_transitions"] = list(TRANSITIONS.get(app.status, ()))
     return values
+
+
+def _document_files(paths) -> set[Path]:
+    documents_dir = Path(settings.documents_dir).resolve()
+    files = set()
+    for stored_path in paths:
+        if not stored_path:
+            continue
+        path = Path(stored_path).resolve()
+        if path.is_relative_to(documents_dir) and path.suffix in (".pdf", ".html"):
+            files.add(path.with_suffix(".pdf"))
+            files.add(path.with_suffix(".html"))
+    return files

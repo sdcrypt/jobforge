@@ -122,6 +122,8 @@ labels such as "14 days+" are left without an exact timestamp.
 - Timestamped status history with optional notes and protection against stale status updates
 - Separate document status (`not_started`, `generating`, `ready`, `failed`); regenerating documents preserves submitted application stages
 - Tracked jobs are preserved by stale-job cleanup and the Jobs page's Clear action
+- Open an application and choose **Delete application permanently** to remove an expired, closed, or unwanted opportunity from both Applications and Jobs, including its notes, interviews, reminders, history, and generated PDF/HTML documents. Confirmation is required, and deletion waits for active document generation to finish. Shared documents used by another application are retained.
+- Deletion removes the local records; a later search can rediscover the job if the portal still lists it. Use **Withdrawn** when you want to retain a record of a decision to stop pursuing a role.
 
 Existing application records are upgraded automatically on backend startup. Legacy
 document states become preparation/document states, and legacy job tracking states
@@ -134,6 +136,9 @@ The tracker API uses job IDs: `PUT /api/applications/{job_id}` saves a job,
 `expected_status`, and an optional `note`. Responses include the job summary,
 status history, document status, and allowed next stages. Dates are stored in UTC
 and displayed in the browser's local timezone.
+
+`DELETE /api/applications/{job_id}` permanently deletes the application and its job.
+Any document-cleanup failure is reported separately after the database deletion.
 
 Run backend tests with `docker compose exec backend python -m unittest discover -s tests -v`.
 

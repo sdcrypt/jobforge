@@ -31,15 +31,17 @@ function StatusBadge({ status }: { status: ApplicationStatus }) {
   return <span className={`inline-block rounded px-2 py-1 text-xs font-medium ${color}`}>{statusLabel(status)}</span>
 }
 
-function ApplicationEditor({ application, onClose, onSaved }: {
+function ApplicationEditor({ application, onClose, onSaved, onDeleted }: {
   application: Application
   onClose: () => void
   onSaved: () => void
+  onDeleted: (jobId: string, message: string) => void
 }) {
   const [current, setCurrent] = useState(application)
   const [draft, setDraft] = useState(() => details(application))
   const [statusNote, setStatusNote] = useState('')
   const [busy, setBusy] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -73,6 +75,22 @@ function ApplicationEditor({ application, onClose, onSaved }: {
       setError(cause instanceof Error ? cause.message : 'Could not save application')
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function removeApplication() {
+    if (!window.confirm(`Permanently delete ${current.job.title} at ${current.job.company}? This removes the application, job listing, notes, interviews, reminders, timeline, and its generated documents. This cannot be undone.`)) return
+    setBusy(true)
+    setDeleting(true)
+    setError(null)
+    try {
+      const result = await api.applications.remove(current.job_id)
+      onDeleted(current.job_id, [result.message, result.cleanup_warning].filter(Boolean).join(' '))
+    } catch (cause: unknown) {
+      setError(cause instanceof Error ? cause.message : 'Could not delete application')
+    } finally {
+      setBusy(false)
+      setDeleting(false)
     }
   }
 
@@ -219,6 +237,14 @@ function ApplicationEditor({ application, onClose, onSaved }: {
           </li>)}
         </ol>
       </section>
+      <section className="mt-6 border-t pt-5 space-y-3" aria-labelledby="delete-title">
+        <h3 id="delete-title" className="font-semibold">No longer pursuing this job?</h3>
+        <p className="text-sm text-slate-500">Delete expired, closed, or unwanted opportunities from both Applications and Jobs, along with their notes, interviews, reminders, and generated documents.</p>
+        <button type="button" disabled={busy} onClick={removeApplication} className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-50">
+          {deleting ? 'Deleting…' : 'Delete application permanently'}
+        </button>
+        <p className="text-xs text-slate-500">A future search may find this job again if the source still lists it. Documents shared with another application are retained.</p>
+      </section>
     </dialog>
   )
 }
@@ -230,6 +256,7 @@ export default function ApplicationsPage() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [dueOnly, setDueOnly] = useState(false)
   const [selected, setSelected] = useState<Application | null>(null)
+  const [actionMessage, setActionMessage] = useState<string | null>(null)
   const applications = data?.applications || []
   const due = applications.filter(reminderDue)
   const filtered = applications.filter(application => (
@@ -247,6 +274,7 @@ export default function ApplicationsPage() {
         </div>
       </div>
       {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">Could not load applications. {error.message} <button onClick={() => void mutate()} className="underline">Retry</button></p>}
+      {actionMessage && <p role="status" className="rounded-lg bg-slate-100 p-3 text-sm text-slate-700">{actionMessage}</p>}
       {due.length > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800" role="status">
         {due.length} follow-up reminder{due.length === 1 ? '' : 's'} due. <button className="underline font-medium" onClick={() => { setDueOnly(true); setStatusFilter('all'); setQuery('') }}>Show due follow-ups</button>
       </div>}
@@ -299,7 +327,14 @@ export default function ApplicationsPage() {
               </tr>)}</tbody>
             </table>
           </div>}
-      {selected && <ApplicationEditor key={selected.id} application={selected} onClose={() => setSelected(null)} onSaved={() => { void mutate() }} />}
+      {selected && <ApplicationEditor key={selected.id} application={selected} onClose={() => setSelected(null)} onSaved={() => { void mutate() }} onDeleted={(jobId, message) => {
+        setSelected(null)
+        setActionMessage(message)
+        void mutate(previous => previous ? {
+          applications: previous.applications.filter(application => application.job_id !== jobId),
+          count: previous.applications.filter(application => application.job_id !== jobId).length,
+        } : previous, { revalidate: true })
+      }} />}
     </div>
   )
 }
