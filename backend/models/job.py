@@ -24,6 +24,10 @@ class Job(Base):
     url: Mapped[str] = mapped_column(String(1024), unique=True, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     salary_range: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    salary_min: Mapped[float | None] = mapped_column(Float, nullable=True)
+    salary_max: Mapped[float | None] = mapped_column(Float, nullable=True)
+    salary_currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    salary_period: Mapped[str | None] = mapped_column(String(10), nullable=True)
     job_type: Mapped[str | None] = mapped_column(String(50), nullable=True)  # full-time, contract...
     remote: Mapped[bool] = mapped_column(Boolean, default=False)
 

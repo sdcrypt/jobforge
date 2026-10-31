@@ -49,6 +49,11 @@ async def init_db():
             else "DATETIME"
         )
         _new_columns = [
+            ("jobs", "salary_min", "FLOAT"),
+            ("jobs", "salary_max", "FLOAT"),
+            ("jobs", "salary_currency", "VARCHAR(3)"),
+            ("jobs", "salary_period", "VARCHAR(10)"),
+            ("search_configs", "name", "VARCHAR(100) DEFAULT 'Default search'"),
             # jobs — Phase 5 Research Agent fields
             ("jobs",           "fit_summary",           "TEXT"),
             ("jobs",           "talking_points",        json_type),

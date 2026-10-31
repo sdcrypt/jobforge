@@ -40,7 +40,7 @@ async def run_pipeline(db: AsyncSession, config_data: dict | None = None, config
 
     # ── Load config ───────────────────────────────────────────────────────
     config_r = await db.execute(
-        select(SearchConfig).where(SearchConfig.active == True).limit(1)
+        select(SearchConfig).where(SearchConfig.active == True).order_by(SearchConfig.updated_at.desc()).limit(1)
     )
     config = config_r.scalar_one_or_none()
     if config_data is not None:
@@ -66,7 +66,8 @@ async def run_pipeline(db: AsyncSession, config_data: dict | None = None, config
     # Remove stale local rows before adding fresh results. Search agents already
     # request recent postings, but old rows can remain from earlier runs.
     await stage("cleanup", "Removing stale untracked jobs")
-    cleaned_count = await _cleanup_stale_jobs(db, config.posted_within_days)
+    retention = (await db.execute(select(func.max(SearchConfig.posted_within_days)).where(SearchConfig.active == True))).scalar_one_or_none()
+    cleaned_count = await _cleanup_stale_jobs(db, max(config.posted_within_days, retention or 0))
     await commit_owned(db)
     await stage("cleanup", f"Removed {cleaned_count} stale jobs", cleaned_count, cleaned_count, done=True,
                 result={"old_jobs_removed": cleaned_count})
@@ -84,7 +85,11 @@ async def run_pipeline(db: AsyncSession, config_data: dict | None = None, config
         linkedin_pages=getattr(config, "linkedin_pages", 1),
     )
 
-    await stage("search", f"Found {len(raw_jobs)} results", len(raw_jobs), len(raw_jobs), done=True)
+    portal_reports = getattr(search_agent, "portal_reports", {})
+    await stage("search", f"Found {len(raw_jobs)} results", len(raw_jobs), len(raw_jobs), done=True,
+                result={"portal_reports": portal_reports})
+    if portal_reports and all(report["status"] == "failed" for report in portal_reports.values()):
+        raise RuntimeError("All configured portals failed. See portal reports for details.")
     await stage("store", "Saving new jobs and skipping duplicates")
     new_count = await store_jobs(db, raw_jobs)
     await commit_owned(db)
@@ -103,7 +108,7 @@ async def run_pipeline(db: AsyncSession, config_data: dict | None = None, config
     await commit_owned(db)
     summary = {"new_jobs_found": new_count, "jobs_ranked": ranked_count,
                "old_jobs_removed": cleaned_count, "portals_searched": config.portals,
-               "keywords": config.keywords}
+               "keywords": config.keywords, "portal_reports": portal_reports}
     auto_n = getattr(config, "auto_research_top_n", 5)
     await stage("research", f"Researching up to {auto_n} top matches")
     summary["jobs_researched"] = await _auto_research(profile, auto_n) if auto_n > 0 else 0
@@ -124,7 +129,11 @@ async def store_jobs(db: AsyncSession, raw_jobs: list[dict]) -> int:
 
         # Primary: URL
         existing_url = await db.execute(select(Job).where(Job.url == url))
-        if existing_url.scalar_one_or_none():
+        existing = existing_url.scalar_one_or_none()
+        if existing:
+            for field in ("salary_min", "salary_max", "salary_currency", "salary_period"):
+                if getattr(existing, field) is None and j.get(field) is not None:
+                    setattr(existing, field, j[field])
             continue
 
         # Secondary: same company + title (case-insensitive)
@@ -178,6 +187,7 @@ async def _cleanup_stale_jobs(db: AsyncSession, posted_within_days: int) -> int:
             and_(Job.posted_at == None, Job.found_at < cutoff),  # noqa: E711
         ),
         Job.status.notin_(protected_job_statuses),
+        Job.portal != "manual",
         Job.id.notin_(protected_application_job_ids),
         Job.id.notin_(protected_run_job_ids),
     )

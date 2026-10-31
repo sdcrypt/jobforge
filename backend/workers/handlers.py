@@ -66,14 +66,18 @@ async def perform_run(run) -> dict:
         if run.kind == "search":
             from agents.search import SearchAgent
             await stage("search", "Searching job portals")
-            raw = await SearchAgent(db=db).run(**run.payload)
-            await stage("search", f"Found {len(raw)} results", len(raw), len(raw), done=True)
+            agent = SearchAgent(db=db)
+            raw = await agent.run(**run.payload)
+            reports = getattr(agent, "portal_reports", {})
+            await stage("search", f"Found {len(raw)} results", len(raw), len(raw), done=True, result={"portal_reports": reports})
+            if reports and all(report["status"] == "failed" for report in reports.values()):
+                raise RuntimeError("All configured portals failed. See portal reports for details.")
             from agents.pipeline import store_jobs
             await stage("store", "Saving new jobs")
             count = await store_jobs(db, raw)
             await commit_owned(db)
             await stage("store", f"Saved {count} new jobs", count, count, done=True)
-            return {"new_jobs_found": count}
+            return {"new_jobs_found": count, "portal_reports": reports}
         if run.kind == "research":
             await stage("research", "Analysing job fit")
             result = await research_one(db, run.job_id)

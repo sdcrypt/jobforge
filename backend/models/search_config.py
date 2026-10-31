@@ -14,6 +14,8 @@ from core.database import Base
 class SearchConfig(Base):
     __tablename__ = "search_configs"
 
+    name: Mapped[str] = mapped_column(String(100), default="Default search")
+
     id: Mapped[str] = mapped_column(
         String(36), primary_key=True, default=lambda: str(uuid.uuid4())
     )

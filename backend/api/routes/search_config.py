@@ -21,6 +21,7 @@ SUPPORTED_PORTALS = {
 
 
 class SearchConfigCreate(BaseModel):
+    name: str = Field(default="Default search", min_length=1, max_length=100)
     keywords: list[str]
     locations: list[str] = ["remote"]
     portals: list[str] = ["linkedin", "remoteok", "weworkremotely", "hackernews"]
@@ -33,6 +34,11 @@ class SearchConfigCreate(BaseModel):
     linkedin_pages: int = 1            # LinkedIn pagination pages (each page = 25 jobs)
     # Auto-research: 0 = disabled, N = research top N jobs by score after each run
     auto_research_top_n: int = 5
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def validate_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
     @field_validator("keywords", "locations")
     @classmethod
@@ -89,23 +95,34 @@ async def create_search_config(
     data: SearchConfigCreate,
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a search configuration. Replaces any existing one."""
-    # Deactivate old configs
-    old_r = await db.execute(select(SearchConfig))
-    for old in old_r.scalars().all():
-        old.active = False
-
     config = SearchConfig(**data.model_dump())
     db.add(config)
     await db.flush()
     return {"id": config.id, "message": "Search config saved."}
 
 
+@router.get("/all")
+async def list_search_configs(db: AsyncSession = Depends(get_db)):
+    configs = (await db.execute(select(SearchConfig).order_by(SearchConfig.updated_at.desc(), SearchConfig.id))).scalars().all()
+    return {"configs": configs}
+
+
+@router.put("/{config_id}")
+async def update_search_config(config_id: str, data: SearchConfigCreate, db: AsyncSession = Depends(get_db)):
+    config = await db.get(SearchConfig, config_id)
+    if not config:
+        raise HTTPException(404, "Search configuration not found.")
+    for field, value in data.model_dump().items():
+        setattr(config, field, value)
+    await db.flush()
+    return {"id": config.id, "message": "Search config updated."}
+
+
 @router.get("")
 async def get_search_config(db: AsyncSession = Depends(get_db)):
     """Get the active search configuration."""
     result = await db.execute(
-        select(SearchConfig).where(SearchConfig.active == True).limit(1)
+        select(SearchConfig).where(SearchConfig.active == True).order_by(SearchConfig.updated_at.desc()).limit(1)
     )
     config = result.scalar_one_or_none()
     if not config:
@@ -120,6 +137,7 @@ pipeline_router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
 
 @pipeline_router.post("/run", status_code=202)
 async def run_pipeline(
+    config_id: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -129,7 +147,9 @@ async def run_pipeline(
     from core.runs import enqueue_run, run_response
     from models.profile import UserProfile
     from workers.scheduler import snapshot
-    config = (await db.execute(select(SearchConfig).where(SearchConfig.active == True).limit(1))).scalar_one_or_none()
+    config = await db.get(SearchConfig, config_id) if config_id else (await db.execute(
+        select(SearchConfig).where(SearchConfig.active == True).order_by(SearchConfig.updated_at.desc()).limit(1)
+    )).scalar_one_or_none()
     if not config:
         raise HTTPException(400, "Save a search configuration before starting the pipeline.")
     if not (await db.execute(select(UserProfile.id).limit(1))).first():

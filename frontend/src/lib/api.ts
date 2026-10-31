@@ -13,7 +13,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }))
-    throw new Error(typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail || `HTTP ${res.status}`))
+    throw new Error(typeof err.detail === 'string' ? err.detail : typeof err.detail?.message === 'string' ? err.detail.message : JSON.stringify(err.detail || `HTTP ${res.status}`))
   }
   return res.json()
 }
@@ -29,6 +29,10 @@ export interface Job {
   portal: string
   remote: boolean
   salary_range: string | null
+  salary_min: number | null
+  salary_max: number | null
+  salary_currency: string | null
+  salary_period: 'year' | 'month' | 'hour' | null
   job_type: string | null
   fit_score: number | null
   tech_score: number | null
@@ -43,6 +47,50 @@ export interface Job {
   researched_at: string | null
   status: string
   found_at: string
+  posted_at: string | null
+}
+
+export interface JobsQuery {
+  status?: string
+  application_status?: string
+  keyword?: string
+  company?: string
+  portal?: string
+  location?: string
+  remote?: boolean
+  min_score?: number
+  salary_min?: number
+  salary_max?: number
+  salary_currency?: string
+  salary_period?: string
+  has_salary?: boolean
+  posted_within_days?: number
+  sort?: string
+  limit?: number
+  offset?: number
+}
+
+export interface JobsResult {
+  jobs: Job[]
+  count: number
+  total: number
+  limit: number
+  offset: number
+  has_more: boolean
+}
+
+export interface ManualJobInput {
+  title: string
+  company: string
+  url?: string
+  description?: string
+  location?: string
+  remote?: boolean
+  salary_min?: number
+  salary_max?: number
+  salary_currency?: string
+  salary_period?: string
+  posted_at?: string
 }
 
 export interface UserProfile {
@@ -67,6 +115,7 @@ export interface UserProfile {
 
 export interface SearchConfig {
   id: string
+  name: string
   keywords: string[]
   locations: string[]
   portals: string[]
@@ -241,16 +290,17 @@ export const api = {
   // ── Search Config ───────────────────────────────────────────────────────
   searchConfig: {
     get: () => req<SearchConfig>('/api/search-config'),
+    list: () => req<{ configs: SearchConfig[] }>('/api/search-config/all'),
     save: (data: Partial<SearchConfig>) =>
-      req<{ id: string; message: string }>('/api/search-config', {
-        method: 'POST',
+      req<{ id: string; message: string }>(data.id ? `/api/search-config/${data.id}` : '/api/search-config', {
+        method: data.id ? 'PUT' : 'POST',
         body: JSON.stringify(data),
       }),
   },
 
   // ── Pipeline ────────────────────────────────────────────────────────────
   pipeline: {
-    run: () => req<QueuedRun>('/api/pipeline/run', { method: 'POST' }),
+    run: (configId?: string) => req<QueuedRun>(`/api/pipeline/run${configId ? `?config_id=${encodeURIComponent(configId)}` : ''}`, { method: 'POST' }),
   },
 
   runs: {
@@ -267,14 +317,12 @@ export const api = {
 
   // ── Jobs ────────────────────────────────────────────────────────────────
   jobs: {
-    list: (params?: { status?: string; application_status?: string; min_score?: number; limit?: number }) => {
+    list: (params?: JobsQuery) => {
       const qs = new URLSearchParams()
-      if (params?.status)    qs.set('status', params.status)
-      if (params?.application_status) qs.set('application_status', params.application_status)
-      if (params?.min_score) qs.set('min_score', String(params.min_score))
-      if (params?.limit)     qs.set('limit', String(params.limit))
-      return req<{ jobs: Job[]; count: number }>(`/api/jobs?${qs}`)
+      Object.entries(params || {}).forEach(([key, value]) => { if (value !== undefined && value !== '') qs.set(key, String(value)) })
+      return req<JobsResult>(`/api/jobs?${qs}`)
     },
+    import: (data: ManualJobInput) => req<Job>('/api/jobs/import', { method: 'POST', body: JSON.stringify(data) }),
     get: (id: string) => req<Job>(`/api/jobs/${id}`),
     dismiss: (id: string) =>
       req<{ message: string }>(`/api/jobs/${id}/dismiss`, { method: 'PATCH' }),

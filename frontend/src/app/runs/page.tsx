@@ -58,7 +58,7 @@ export default function RunsPage() {
       <table className="w-full text-left text-sm">
         <thead className="bg-slate-50 text-slate-500"><tr>{['Run', 'Status', 'Stage', 'Attempt', 'Created'].map(heading => <th key={heading} scope="col" className="p-3 font-medium">{heading}</th>)}</tr></thead>
         <tbody>{data?.runs.map(run => <tr key={run.id} className={`border-t ${selectedId === run.id ? 'bg-brand-50' : ''}`}>
-          <td className="p-3"><button className="text-left text-brand-700 hover:underline" onClick={() => { setSelectedId(run.id); setActionError(null) }}>{statusLabel(run.kind)} · {run.id.slice(0, 8)}</button>{run.job_id && <p className="mt-1 text-xs text-slate-700">{run.label}</p>}<p className="mt-1 text-xs text-slate-500">{run.trigger}{run.parent_id ? ' · part of pipeline' : ''}{run.retry_of ? ' · manual retry' : ''}</p></td>
+          <td className="p-3"><button className="text-left text-brand-700 hover:underline" onClick={() => { setSelectedId(run.id); setActionError(null) }}>{statusLabel(run.kind)} · {run.id.slice(0, 8)}</button>{(run.job_id || run.config_id) && <p className="mt-1 text-xs text-slate-700">{run.label}</p>}<p className="mt-1 text-xs text-slate-500">{run.trigger}{run.parent_id ? ' · part of pipeline' : ''}{run.retry_of ? ' · manual retry' : ''}</p></td>
           <td className="p-3"><RunBadge status={run.status} /></td><td className="p-3 capitalize">{run.stage}</td><td className="p-3">{run.attempts}/{run.max_attempts}</td><td className="p-3 whitespace-nowrap text-xs">{formatDate(run.created_at)}</td>
         </tr>)}</tbody>
       </table>
@@ -67,7 +67,11 @@ export default function RunsPage() {
     {selected && <section className="rounded-xl border bg-white p-5 space-y-4" aria-label="Run details">
       <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">{statusLabel(selected.kind)} run</h2><p className="break-all text-xs text-slate-500">{selected.id}</p></div><RunBadge status={selected.status} /></div>
       <p className="text-xs text-slate-500">Started {formatDate(selected.started_at)} · Finished {formatDate(selected.finished_at)} · Attempt {selected.attempts}/{selected.max_attempts}</p>
-      {selected.job_id && <p className="text-sm font-medium">{selected.label}</p>}
+      {(selected.job_id || selected.config_id) && <p className="text-sm font-medium">{selected.label}</p>}
+      {Boolean(selected.result?.portal_reports) && <section className="space-y-3"><h3 className="text-sm font-semibold">Portal search reports</h3>{Object.entries(selected.result!.portal_reports as Record<string, { status: string; found: number; searches: { keyword: string; location: string; status: string; errors: string[]; excluded_old: number; unknown_date: number }[] }>).map(([portal, report]) => <div key={portal} className="rounded-lg border p-3 text-sm">
+        <p className="font-medium">{portal} · {report.status} · {report.found} results before deduplication</p>
+        {report.searches.map((search, index) => <div key={index} className="mt-2 text-xs text-slate-600"><p>{search.keyword} / {search.location} · {search.status} · {search.excluded_old} outside date window · {search.unknown_date} undated</p>{search.errors.map((message, errorIndex) => <p key={errorIndex} className="mt-1 text-red-700">{message}</p>)}</div>)}
+      </div>)}</section>}
       {selected.status === 'queued' && <p className="text-sm text-slate-600">Waiting for a worker. You can leave this page; the run is saved.</p>}
       {selected.next_retry_at && <p className="text-sm text-amber-800">Automatic retry due {formatDate(selected.next_retry_at)}. The scheduler checks every minute.</p>}
       {selected.dispatch_error && <p className="text-sm text-amber-800">{selected.dispatch_error}</p>}

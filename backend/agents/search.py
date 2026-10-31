@@ -17,7 +17,8 @@ import asyncio
 import random
 import httpx
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from contextvars import ContextVar
 from dateutil import parser as dateutil_parser
 from core.config import settings
 from agents.base import BaseAgent
@@ -33,6 +34,7 @@ USER_AGENTS = [
 ]
 
 SUPPORTED_PORTALS = {"linkedin", "remoteok", "weworkremotely", "hackernews", "jobleads"}
+_search_report = ContextVar("search_report", default=None)
 
 
 def _ua() -> str:
@@ -43,7 +45,8 @@ def _safe_date(raw: str | None) -> datetime | None:
     if not raw:
         return None
     try:
-        return dateutil_parser.parse(str(raw), ignoretz=True)
+        parsed = dateutil_parser.parse(str(raw))
+        return parsed.astimezone(timezone.utc).replace(tzinfo=None) if parsed.tzinfo else parsed
     except Exception:
         return None
 
@@ -51,6 +54,12 @@ def _safe_date(raw: str | None) -> datetime | None:
 class SearchAgent(BaseAgent):
     name = "search"
     model = settings.llm_model_fast
+
+    async def emit(self, status: str, message: str, data: dict | None = None):
+        report = _search_report.get()
+        if report is not None and status == "error":
+            report["errors"].append(message)
+        await super().emit(status, message, data)
 
     # ── Entry point ───────────────────────────────────────────────────────────
 
@@ -89,14 +98,39 @@ class SearchAgent(BaseAgent):
         sem = asyncio.Semaphore(4)
 
         async def bounded(portal, keyword, location):
-            async with sem:
-                await asyncio.sleep(random.uniform(0.4, 1.2))
-                return await self._search_one(
-                    portal, keyword, location, remote_only,
-                    max_results=max_results,
-                    linkedin_pages=linkedin_pages,
-                    posted_within_days=posted_within_days,
-                )
+            report = {"keyword": keyword, "location": location, "errors": [], "found": 0,
+                      "excluded_old": 0, "unknown_date": 0}
+            token = _search_report.set(report)
+            jobs = []
+            try:
+                async with sem:
+                    await asyncio.sleep(random.uniform(0.4, 1.2))
+                    batch = await self._search_one(
+                        portal, keyword, location, remote_only,
+                        max_results=max_results, linkedin_pages=linkedin_pages,
+                        posted_within_days=posted_within_days,
+                    )
+                    cutoff = datetime.utcnow() - timedelta(days=posted_within_days)
+                    for job in batch:
+                        posted = job.get("posted_at")
+                        if posted and posted.tzinfo:
+                            posted = posted.astimezone(timezone.utc).replace(tzinfo=None)
+                            job["posted_at"] = posted
+                        if posted and posted < cutoff:
+                            report["excluded_old"] += 1
+                            continue
+                        if remote_only and not job.get("remote"):
+                            continue
+                        if not posted:
+                            report["unknown_date"] += 1
+                        jobs.append(job)
+            except Exception as error:
+                await self.emit("error", f"{portal}: {keyword} / {location} failed: {error}", {"portal": portal})
+            finally:
+                _search_report.reset(token)
+            report["found"] = len(jobs)
+            report["status"] = "partial" if report["errors"] and jobs else "failed" if report["errors"] else "succeeded"
+            return portal, jobs, report
 
         results = await asyncio.gather(
             *[bounded(p, k, l) for p, k, l in combos],
@@ -105,16 +139,28 @@ class SearchAgent(BaseAgent):
 
         seen_urls: set[str] = set()
         all_jobs: list[dict] = []
+        self.portal_reports = {}
         for batch in results:
             if isinstance(batch, Exception):
                 log.warning("search.batch_error", error=str(batch))
                 await self.emit("error", f"A portal search failed: {batch}")
                 continue
-            for job in batch:
+            portal, jobs, report = batch
+            entry = self.portal_reports.setdefault(portal, {"status": "succeeded", "found": 0, "searches": []})
+            entry["searches"].append(report)
+            entry["found"] += len(jobs)
+            for job in jobs:
                 url = job.get("url", "")
                 if url and url not in seen_urls:
                     seen_urls.add(url)
                     all_jobs.append(job)
+
+        for portal, report in self.portal_reports.items():
+            statuses = [search["status"] for search in report["searches"]]
+            report["status"] = "failed" if all(status == "failed" for status in statuses) else "partial" if any(status != "succeeded" for status in statuses) else "succeeded"
+            await self.emit("error" if report["status"] != "succeeded" else "thinking",
+                            f"{portal}: {report['status']} · {report['found']} results across {len(statuses)} searches",
+                            {"portal": portal, "report": report})
 
         await self.emit(
             "done",
@@ -138,7 +184,8 @@ class SearchAgent(BaseAgent):
         try:
             if portal == "linkedin":
                 return await self._search_linkedin(keyword, location, remote_only,
-                                                   max_results=max_results, pages=linkedin_pages)
+                                                   max_results=max_results, pages=linkedin_pages,
+                                                   posted_within_days=posted_within_days)
             elif portal == "remoteok":
                 return await self._search_remoteok(keyword, location, max_results=max_results)
             elif portal == "weworkremotely":
@@ -165,7 +212,7 @@ class SearchAgent(BaseAgent):
 
     async def _search_linkedin(
         self, keyword: str, location: str, remote_only: bool,
-        max_results: int = 15, pages: int = 1,
+        max_results: int = 15, pages: int = 1, posted_within_days: int = 7,
     ) -> list[dict]:
         """
         LinkedIn guest API — paginates through `pages` result pages.
@@ -174,7 +221,7 @@ class SearchAgent(BaseAgent):
         base_params: dict[str, str] = {
             "keywords": keyword,
             "location": location,
-            "f_TPR":    "r604800",   # last 7 days
+            "f_TPR":    f"r{posted_within_days * 86400}",
         }
         if remote_only:
             base_params["f_WT"] = "2"
@@ -207,6 +254,8 @@ class SearchAgent(BaseAgent):
                     break
                 job = self._parse_linkedin_card(card, keyword)
                 if job:
+                    if remote_only:
+                        job["remote"] = True
                     jobs.append(job)
 
             # Polite delay between pages
@@ -294,6 +343,10 @@ class SearchAgent(BaseAgent):
                 "portal":      "remoteok",
                 "remote":      True,
                 "salary_range": salary,
+                "salary_min": float(lo) if lo else None,
+                "salary_max": float(hi) if hi else None,
+                "salary_currency": "USD" if lo or hi else None,
+                "salary_period": "year" if lo or hi else None,
                 "job_type":    "full-time",
                 "description": BeautifulSoup(job.get("description", ""), "html.parser").get_text()[:500],
                 "posted_at":   _safe_date(job.get("date")),
@@ -469,6 +522,11 @@ class SearchAgent(BaseAgent):
             ) as client:
                 resp = await client.get(url, params=params)
                 if resp.status_code == 200:
+                    title = BeautifulSoup(resp.text, "html.parser").title
+                    title_text = title.get_text(" ", strip=True).lower() if title else ""
+                    if not resp.text.strip() or any(marker in title_text for marker in ("just a moment", "access denied", "verify you are human", "security check")):
+                        await self.emit("error", "Portal returned an empty response or access-verification page.", {"url": url})
+                        return None
                     return resp.text
                 log.warning("search.http_error", url=url, status=resp.status_code)
                 await self.emit("error", f"Job portal returned HTTP {resp.status_code}", {"url": url})

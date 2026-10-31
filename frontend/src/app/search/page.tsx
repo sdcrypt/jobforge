@@ -16,6 +16,8 @@ const PORTALS: { id: string; label: string; note: string }[] = [
 const SUPPORTED_PORTAL_IDS = new Set(PORTALS.map((p) => p.id))
 
 const BLANK: Partial<SearchConfig> = {
+  name: '',
+  active: true,
   keywords: [],
   locations: [],
   portals: ['linkedin', 'remoteok', 'weworkremotely', 'hackernews'],
@@ -29,6 +31,7 @@ const BLANK: Partial<SearchConfig> = {
 
 export default function SearchPage() {
   const [form, setForm] = useState(BLANK)
+  const [configs, setConfigs] = useState<SearchConfig[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [running, setRunning] = useState(false)
@@ -41,18 +44,30 @@ export default function SearchPage() {
   const [locationsRaw, setLocationsRaw] = useState('')
 
   useEffect(() => {
-    api.searchConfig.get()
-      .then((c: SearchConfig) => {
-        setForm({
-          ...c,
-          portals: (c.portals ?? []).filter((portal) => SUPPORTED_PORTAL_IDS.has(portal)),
-        })
-        setKeywordsRaw(c.keywords?.join(', ') ?? '')
-        setLocationsRaw(c.locations?.join(', ') ?? '')
+    api.searchConfig.list()
+      .then(({ configs: saved }) => {
+        setConfigs(saved)
+        if (saved.length) selectConfig(saved[0])
       })
-      .catch(() => { /* no config yet */ })
+      .catch((cause: unknown) => setMsg({ ok: false, text: cause instanceof Error ? cause.message : 'Could not load configurations.' }))
       .finally(() => setLoading(false))
   }, [])
+
+  function selectConfig(config?: SearchConfig) {
+    setForm(config ? { ...config, portals: config.portals.filter(portal => SUPPORTED_PORTAL_IDS.has(portal)) } : { ...BLANK })
+    setKeywordsRaw(config?.keywords.join(', ') ?? '')
+    setLocationsRaw(config?.locations.join(', ') ?? '')
+    setMsg(null)
+  }
+
+  async function persistConfig() {
+    const saved = await api.searchConfig.save(buildPayload())
+    const result = await api.searchConfig.list()
+    setConfigs(result.configs)
+    const config = result.configs.find(entry => entry.id === saved.id)
+    if (config) setForm(config)
+    return saved.id
+  }
 
   function parseList(raw: string) {
     return raw.split(',').map((s) => s.trim()).filter(Boolean)
@@ -72,7 +87,7 @@ export default function SearchPage() {
     setSaving(true)
     setMsg(null)
     try {
-      await api.searchConfig.save(buildPayload())
+      await persistConfig()
       setMsg({ ok: true, text: 'Search config saved ✓' })
     } catch (err: unknown) {
       setMsg({ ok: false, text: err instanceof Error ? err.message : 'Save failed' })
@@ -85,8 +100,8 @@ export default function SearchPage() {
     setRunning(true)
     setMsg(null)
     try {
-      await api.searchConfig.save(buildPayload())
-      const res = await api.pipeline.run()
+      const configId = await persistConfig()
+      const res = await api.pipeline.run(configId)
       await refreshRuns()
       setMsg({ ok: true, text: res.message })
     } catch (err: unknown) {
@@ -125,6 +140,14 @@ export default function SearchPage() {
       </p>
 
       <form onSubmit={handleSave} className="space-y-6">
+
+        <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-5">
+          <h2 className="font-semibold text-slate-700">Named search configurations</h2>
+          <label className="block text-sm">Choose configuration<select className="input mt-1" value={form.id ?? ''} disabled={saving || running} onChange={event => selectConfig(configs.find(config => config.id === event.target.value))}><option value="">New configuration</option>{configs.map(config => <option key={config.id} value={config.id}>{config.name}{!config.active ? ' · scheduling paused' : ''}</option>)}</select></label>
+          <label className="block text-sm">Configuration name<input className="input mt-1" required maxLength={100} value={form.name ?? ''} placeholder="Backend roles — Germany" onChange={event => setForm(previous => ({ ...previous, name: event.target.value }))} /></label>
+          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.active ?? true} onChange={event => setForm(previous => ({ ...previous, active: event.target.checked }))} /> Enable scheduled runs for this configuration</label>
+          <p className="text-xs text-slate-500">Each configuration keeps its own keywords, markets, schedule, and last run. Saving edits updates the selected configuration without replacing the others. Run Now uses this configuration, even if scheduling is paused. Discovery runs are serialized, not overlapped.</p>
+        </section>
 
         {/* Keywords */}
         <div className="bg-white rounded-xl border border-slate-200 p-5 space-y-4">
@@ -352,7 +375,7 @@ export default function SearchPage() {
             {pipelineBusy ? (
               <><span className="animate-spin">⚙️</span> {activeRun?.status === 'queued' ? 'Queued…' : activeRun?.status === 'retrying' ? 'Retry scheduled…' : running ? 'Queueing…' : 'Running…'}</>
             ) : (
-              '🚀 Run Now'
+              '🚀 Save & Run This Config'
             )}
           </button>
         </div>

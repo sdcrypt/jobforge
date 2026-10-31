@@ -271,7 +271,7 @@ export default function JobCard({ job, onRefresh }: Props) {
           </Link>
         )}
         <span className="text-xs bg-slate-100 text-slate-600 rounded px-2 py-0.5 capitalize">
-          {localJob.portal}
+          {localJob.portal === 'manual' ? 'Manually added' : localJob.portal}
         </span>
         {localJob.job_type && (
           <span className="text-xs bg-slate-100 text-slate-600 rounded px-2 py-0.5">
@@ -332,14 +332,14 @@ export default function JobCard({ job, onRefresh }: Props) {
             Mark applied
           </button>
         )}
-        <a
+        {localJob.url.startsWith('http') && <a
           href={localJob.url}
           target="_blank"
           rel="noopener noreferrer"
           className="text-xs px-3 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:border-slate-400 transition-colors"
         >
           View ↗
-        </a>
+        </a>}
 
         {/* Research / View Analysis button */}
         {hasResearch ? (

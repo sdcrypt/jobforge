@@ -50,7 +50,7 @@ class ResearchAgent(BaseAgent):
 
         # 2. Get description — use stored text or try to scrape the full page
         description = job.description or ""
-        if len(description) < 200:
+        if len(description) < 200 and job.portal != "manual":
             await self.emit("thinking", "Fetching full job description from posting URL…")
             fetched = await self._fetch_description(job.url)
             if fetched:
