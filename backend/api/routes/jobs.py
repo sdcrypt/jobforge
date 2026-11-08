@@ -310,7 +310,7 @@ async def get_stats(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{job_id}")
-async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
+async def get_job(job_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(Job).where(Job.id == job_id))
     job = result.scalar_one_or_none()
     if not job:
@@ -319,7 +319,7 @@ async def get_job(job_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.patch("/{job_id}/dismiss")
-async def dismiss_job(job_id: str, db: AsyncSession = Depends(get_db)):
+async def dismiss_job(job_id: int, db: AsyncSession = Depends(get_db)):
     """Mark a job as dismissed — hides it from the default list."""
     result = await db.execute(select(Job).where(Job.id == job_id))
     job = result.scalar_one_or_none()
@@ -331,7 +331,7 @@ async def dismiss_job(job_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/{job_id}/research", status_code=202)
-async def research_job(job_id: str, db: AsyncSession = Depends(get_db)):
+async def research_job(job_id: int, db: AsyncSession = Depends(get_db)):
     """
     Run the Research Agent on a single job.
     Fetches the full description, scores fit against the user's profile,

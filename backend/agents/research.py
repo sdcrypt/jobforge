@@ -32,7 +32,7 @@ class ResearchAgent(BaseAgent):
 
     # ── Entry point ───────────────────────────────────────────────────────────
 
-    async def run(self, job_id: str, profile: dict) -> dict:
+    async def run(self, job_id: int, profile: dict) -> dict:
         """
         Analyse a job posting against the user's profile.
         Updates the Job record in DB and returns the analysis dict.

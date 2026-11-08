@@ -5,7 +5,7 @@ import { WS_URL, AgentEventData, api } from '@/lib/api'
 import { utcDate } from '@/lib/applications'
 
 export interface AgentEvent {
-  id: string
+  id: number | string
   agent: string
   status: 'started' | 'thinking' | 'done' | 'error'
   message: string

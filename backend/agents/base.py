@@ -47,7 +47,7 @@ class BaseAgent(ABC):
     name: str = "agent"
     model: str = settings.llm_model_smart
 
-    def __init__(self, db=None, job_id: str | None = None):
+    def __init__(self, db=None, job_id: int | None = None):
         self.db = db
         self.job_id = job_id
         self.client = _llm_client

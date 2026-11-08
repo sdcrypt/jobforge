@@ -49,7 +49,7 @@ class ConnectionManager:
         status: str,          # "started" | "thinking" | "done" | "error"
         message: str,
         data: dict | None = None,
-        job_id: str | None = None,
+        job_id: int | None = None,
         persist: bool = True,
     ):
         """Structured event for agent activity feed in the UI."""

@@ -24,7 +24,7 @@ from core.runs import ACTIVE_STATUSES
 log = structlog.get_logger()
 
 
-async def run_pipeline(db: AsyncSession, config_data: dict | None = None, config_id: str | None = None) -> dict:
+async def run_pipeline(db: AsyncSession, config_data: dict | None = None, config_id: int | None = None) -> dict:
     """
     Full pipeline:
       1. Load SearchConfig + UserProfile from DB
@@ -245,7 +245,7 @@ async def _auto_research(profile, top_n: int) -> int:
     completed = already_completed
     failed = []
 
-    async def research_one(job_id: str) -> None:
+    async def research_one(job_id: int) -> None:
         nonlocal completed
         async with sem:
             try:

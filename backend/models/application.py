@@ -3,21 +3,21 @@ JobForge — Application model
 Tracks the application lifecycle independently of document generation.
 """
 
-import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, Text, ForeignKey, JSON
+from sqlalchemy import Integer, String, DateTime, Text, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from core.database import Base
 
 
 class Application(Base):
     __tablename__ = "applications"
+    __table_args__ = {"sqlite_autoincrement": True}
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
     )
 
-    job_id: Mapped[str] = mapped_column(String(36), ForeignKey("jobs.id"), index=True, unique=True)
+    job_id: Mapped[int] = mapped_column(Integer, ForeignKey("jobs.id"), index=True, unique=True)
 
     status: Mapped[str] = mapped_column(String(30), default="saved", index=True)
 
@@ -68,14 +68,15 @@ class AgentEvent(Base):
     """Persisted log of every agent action — shown in the UI activity feed."""
 
     __tablename__ = "agent_events"
+    __table_args__ = {"sqlite_autoincrement": True}
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
     )
     agent: Mapped[str] = mapped_column(String(50))         # "search", "rank", "docgen"...
     status: Mapped[str] = mapped_column(String(20))        # "started" | "thinking" | "done" | "error"
     message: Mapped[str] = mapped_column(Text)
     extra: Mapped[dict | None] = mapped_column(JSON, nullable=True)
-    job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    run_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+    job_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    run_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)

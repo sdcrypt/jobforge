@@ -28,7 +28,7 @@ log = structlog.get_logger()
 
 @router.post("/{job_id}/generate-docs", status_code=202)
 async def generate_docs(
-    job_id: str,
+    job_id: int,
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -51,7 +51,7 @@ async def generate_docs(
     }
 
 
-async def _run_docgen(job_id: str):
+async def _run_docgen(job_id: int):
     from core.database import AsyncSessionLocal
     from agents.docgen import DocGenAgent
     async with AsyncSessionLocal() as db:
@@ -86,7 +86,7 @@ async def _run_docgen(job_id: str):
 # ── Preview (HTML in browser) ─────────────────────────────────────────────────
 
 @router.get("/{job_id}/preview/one-pager", response_class=HTMLResponse)
-async def preview_one_pager(job_id: str, db: AsyncSession = Depends(get_db)):
+async def preview_one_pager(job_id: int, db: AsyncSession = Depends(get_db)):
     """Preview the generated one-pager HTML directly in the browser."""
     app = await _get_application(job_id, db)
     if not app.one_pager_html:
@@ -95,7 +95,7 @@ async def preview_one_pager(job_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{job_id}/preview/cover-letter", response_class=HTMLResponse)
-async def preview_cover_letter(job_id: str, db: AsyncSession = Depends(get_db)):
+async def preview_cover_letter(job_id: int, db: AsyncSession = Depends(get_db)):
     """Preview the generated cover letter HTML in the browser."""
     app = await _get_application(job_id, db)
     if not app.cover_letter_path:
@@ -110,7 +110,7 @@ async def preview_cover_letter(job_id: str, db: AsyncSession = Depends(get_db)):
 # ── Download (PDF) ────────────────────────────────────────────────────────────
 
 @router.get("/{job_id}/download/one-pager")
-async def download_one_pager(job_id: str, db: AsyncSession = Depends(get_db)):
+async def download_one_pager(job_id: int, db: AsyncSession = Depends(get_db)):
     """Download the one-pager as PDF (or HTML if WeasyPrint not installed)."""
     app = await _get_application(job_id, db)
     if not app.one_pager_path:
@@ -122,12 +122,12 @@ async def download_one_pager(job_id: str, db: AsyncSession = Depends(get_db)):
     return FileResponse(
         path=str(path),
         media_type=media_type,
-        filename=f"one_pager_{job_id[:8]}{path.suffix}",
+        filename=f"one_pager_{job_id}{path.suffix}",
     )
 
 
 @router.get("/{job_id}/download/cover-letter")
-async def download_cover_letter(job_id: str, db: AsyncSession = Depends(get_db)):
+async def download_cover_letter(job_id: int, db: AsyncSession = Depends(get_db)):
     """Download the cover letter as PDF (or HTML if WeasyPrint not installed)."""
     app = await _get_application(job_id, db)
     if not app.cover_letter_path:
@@ -139,7 +139,7 @@ async def download_cover_letter(job_id: str, db: AsyncSession = Depends(get_db))
     return FileResponse(
         path=str(path),
         media_type=media_type,
-        filename=f"cover_letter_{job_id[:8]}{path.suffix}",
+        filename=f"cover_letter_{job_id}{path.suffix}",
     )
 
 
@@ -147,7 +147,7 @@ async def download_cover_letter(job_id: str, db: AsyncSession = Depends(get_db))
 
 @router.post("/{job_id}/apply", status_code=202)
 async def start_apply(
-    job_id: str,
+    job_id: int,
     db: AsyncSession = Depends(get_db),
 ):
     """Start the Apply Agent. Always pauses for user review before submitting."""
@@ -160,7 +160,7 @@ async def start_apply(
     return run_response(run, created)
 
 
-async def _run_apply(job_id: str):
+async def _run_apply(job_id: int):
     from core.database import AsyncSessionLocal
     from agents.apply import ApplyAgent
     async with AsyncSessionLocal() as db:
@@ -190,19 +190,19 @@ async def list_applications(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{job_id}")
-async def get_application(job_id: str, db: AsyncSession = Depends(get_db)):
+async def get_application(job_id: int, db: AsyncSession = Depends(get_db)):
     app = await _get_application(job_id, db)
     return _serialize(app, await _get_job(job_id, db))
 
 
 @router.put("/{job_id}")
-async def save_application(job_id: str, db: AsyncSession = Depends(get_db)):
+async def save_application(job_id: int, db: AsyncSession = Depends(get_db)):
     app = await _get_or_create_application(job_id, db)
     return _serialize(app, await _get_job(job_id, db))
 
 
 @router.delete("/{job_id}")
-async def delete_application(job_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_application(job_id: int, db: AsyncSession = Depends(get_db)):
     job_result = await db.execute(select(Job).where(Job.id == job_id).with_for_update())
     job = job_result.scalar_one_or_none()
     if job is None:
@@ -247,7 +247,7 @@ async def delete_application(job_id: str, db: AsyncSession = Depends(get_db)):
 
 @router.patch("/{job_id}")
 async def update_application(
-    job_id: str, data: ApplicationUpdate, db: AsyncSession = Depends(get_db),
+    job_id: int, data: ApplicationUpdate, db: AsyncSession = Depends(get_db),
 ):
     app = await _get_application(job_id, db, lock=True)
     values = data.model_dump(exclude_unset=True)
@@ -273,7 +273,7 @@ async def update_application(
 
 @router.patch("/{job_id}/status")
 async def update_status(
-    job_id: str,
+    job_id: int,
     data: StatusChange,
     db: AsyncSession = Depends(get_db),
 ):
@@ -291,7 +291,7 @@ async def update_status(
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
-async def _get_job(job_id: str, db: AsyncSession) -> Job:
+async def _get_job(job_id: int, db: AsyncSession) -> Job:
     r = await db.execute(select(Job).where(Job.id == job_id))
     job = r.scalar_one_or_none()
     if not job:
@@ -307,7 +307,7 @@ async def _get_profile(db: AsyncSession) -> UserProfile:
     return profile
 
 
-async def _get_application(job_id: str, db: AsyncSession, lock: bool = False) -> Application:
+async def _get_application(job_id: int, db: AsyncSession, lock: bool = False) -> Application:
     query = select(Application).where(Application.job_id == job_id)
     if lock:
         query = query.with_for_update()
@@ -318,7 +318,7 @@ async def _get_application(job_id: str, db: AsyncSession, lock: bool = False) ->
     return app
 
 
-async def _get_or_create_application(job_id: str, db: AsyncSession) -> Application:
+async def _get_or_create_application(job_id: int, db: AsyncSession) -> Application:
     job = await db.execute(select(Job).where(Job.id == job_id).with_for_update())
     if job.scalar_one_or_none() is None:
         raise HTTPException(404, "Job not found")

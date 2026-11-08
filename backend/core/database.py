@@ -33,12 +33,17 @@ class Base(DeclarativeBase):
 
 async def init_db():
     """Create all tables on startup and run lightweight column migrations."""
-    from sqlalchemy import inspect, select, text
+    from sqlalchemy import Integer, inspect, select, text
     from models.application import Application
     from models.job import Job
     from core.application_lifecycle import TRANSITIONS, history_entry
 
     async with engine.begin() as conn:
+        legacy_ids = await conn.run_sync(lambda sync: inspect(sync).has_table("jobs") and not isinstance(
+            next(column["type"] for column in inspect(sync).get_columns("jobs") if column["name"] == "id"), Integer
+        ))
+        if legacy_ids:
+            raise RuntimeError("This database schema requires integer record IDs.")
         await conn.run_sync(Base.metadata.create_all)
 
         # SQLAlchemy create_all won't add columns to tables that already exist.
@@ -74,7 +79,7 @@ async def init_db():
             ("applications", "follow_up_at", datetime_type),
             ("applications", "follow_up_completed_at", datetime_type),
             ("applications", "status_history", json_type),
-            ("agent_events", "run_id", "VARCHAR(36)"),
+            ("agent_events", "run_id", "INTEGER"),
         ]
         columns = await conn.run_sync(
             lambda sync_conn: {

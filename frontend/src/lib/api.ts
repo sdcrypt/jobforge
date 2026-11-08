@@ -21,7 +21,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface Job {
-  id: string
+  id: number
   title: string
   company: string
   location: string | null
@@ -94,7 +94,7 @@ export interface ManualJobInput {
 }
 
 export interface UserProfile {
-  id: string
+  id: number
   full_name: string
   email: string
   phone: string | null
@@ -114,7 +114,7 @@ export interface UserProfile {
 }
 
 export interface SearchConfig {
-  id: string
+  id: number
   name: string
   keywords: string[]
   locations: string[]
@@ -136,7 +136,7 @@ export interface SearchConfig {
 export type ApplicationStatus = 'saved' | 'preparing' | 'applied' | 'screening' | 'interviewing' | 'offer' | 'accepted' | 'rejected' | 'withdrawn'
 
 export interface InterviewRound {
-  id: string
+  id: number | string
   round: number
   type: string
   date: string | null
@@ -161,8 +161,8 @@ export interface ApplicationDetails {
 }
 
 export interface Application extends ApplicationDetails {
-  id: string
-  job_id: string
+  id: number
+  job_id: number
   status: ApplicationStatus
   document_status: 'not_started' | 'generating' | 'ready' | 'failed'
   document_error: string | null
@@ -176,7 +176,7 @@ export interface Application extends ApplicationDetails {
 }
 
 export interface TopJob {
-  id: string
+  id: number
   title: string
   company: string
   fit_score: number
@@ -200,8 +200,8 @@ export interface Stats {
 }
 
 export interface AgentEventData {
-  id: string
-  run_id: string | null
+  id: number
+  run_id: number | null
   created_at: string
   agent: string
   status: 'started' | 'thinking' | 'done' | 'error'
@@ -212,13 +212,13 @@ export interface AgentEventData {
 export interface TaskRun {
   label: string
   children?: TaskRun[]
-  id: string
+  id: number
   kind: string
   status: 'queued' | 'running' | 'retrying' | 'succeeded' | 'partial' | 'failed'
-  job_id: string | null
-  config_id: string | null
-  parent_id: string | null
-  retry_of: string | null
+  job_id: number | null
+  config_id: number | null
+  parent_id: number | null
+  retry_of: number | null
   trigger: string
   stage: string
   stages: { name: string; attempt: number; status: string; message: string; completed: number; total: number; error?: string }[]
@@ -236,13 +236,13 @@ export interface TaskRun {
 }
 
 export interface QueuedRun {
-  run_id: string
+  run_id: number
   run: TaskRun
   duplicate: boolean
   message: string
 }
 
-async function waitForRun(runId: string): Promise<TaskRun> {
+async function waitForRun(runId: number | string): Promise<TaskRun> {
   for (let attempt = 0; attempt < 300; attempt += 1) {
     const run = await req<TaskRun>(`/api/runs/${runId}`)
     if (run.status === 'succeeded' || run.status === 'partial') return run
@@ -264,7 +264,7 @@ export const api = {
   profile: {
     get: () => req<UserProfile>('/api/profile'),
     save: (data: Partial<UserProfile>) =>
-      req<{ id: string; message: string }>('/api/profile', {
+      req<{ id: number; message: string }>('/api/profile', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
@@ -292,7 +292,7 @@ export const api = {
     get: () => req<SearchConfig>('/api/search-config'),
     list: () => req<{ configs: SearchConfig[] }>('/api/search-config/all'),
     save: (data: Partial<SearchConfig>) =>
-      req<{ id: string; message: string }>(data.id ? `/api/search-config/${data.id}` : '/api/search-config', {
+      req<{ id: number; message: string }>(data.id ? `/api/search-config/${data.id}` : '/api/search-config', {
         method: data.id ? 'PUT' : 'POST',
         body: JSON.stringify(data),
       }),
@@ -300,7 +300,7 @@ export const api = {
 
   // ── Pipeline ────────────────────────────────────────────────────────────
   pipeline: {
-    run: (configId?: string) => req<QueuedRun>(`/api/pipeline/run${configId ? `?config_id=${encodeURIComponent(configId)}` : ''}`, { method: 'POST' }),
+    run: (configId?: number) => req<QueuedRun>(`/api/pipeline/run${configId ? `?config_id=${encodeURIComponent(configId)}` : ''}`, { method: 'POST' }),
   },
 
   runs: {
@@ -309,9 +309,9 @@ export const api = {
       Object.entries(params || {}).forEach(([key, value]) => { if (value !== undefined) query.set(key, String(value)) })
       return req<{ runs: TaskRun[]; count: number }>(`/api/runs?${query}`)
     },
-    get: (runId: string) => req<TaskRun>(`/api/runs/${runId}`),
-    events: (runId?: string) => req<{ events: AgentEventData[] }>(`/api/runs/events${runId ? `?run_id=${runId}&limit=200` : ''}`),
-    retry: (runId: string, maxAttempts = 3) => req<QueuedRun>(`/api/runs/${runId}/retry`, { method: 'POST', body: JSON.stringify({ max_attempts: maxAttempts }) }),
+    get: (runId: number | string) => req<TaskRun>(`/api/runs/${runId}`),
+    events: (runId?: number) => req<{ events: AgentEventData[] }>(`/api/runs/events${runId ? `?run_id=${runId}&limit=200` : ''}`),
+    retry: (runId: number | string, maxAttempts = 3) => req<QueuedRun>(`/api/runs/${runId}/retry`, { method: 'POST', body: JSON.stringify({ max_attempts: maxAttempts }) }),
     wait: waitForRun,
   },
 
@@ -323,11 +323,11 @@ export const api = {
       return req<JobsResult>(`/api/jobs?${qs}`)
     },
     import: (data: ManualJobInput) => req<Job>('/api/jobs/import', { method: 'POST', body: JSON.stringify(data) }),
-    get: (id: string) => req<Job>(`/api/jobs/${id}`),
-    dismiss: (id: string) =>
+    get: (id: number) => req<Job>(`/api/jobs/${id}`),
+    dismiss: (id: number) =>
       req<{ message: string }>(`/api/jobs/${id}/dismiss`, { method: 'PATCH' }),
     /** Run Research Agent — AI fit analysis against profile. Returns updated scores. */
-    research: async (id: string) => {
+    research: async (id: number) => {
       const queued = await req<QueuedRun>(`/api/jobs/${id}/research`, { method: 'POST' })
       await waitForRun(queued.run_id)
       return req<Job>(`/api/jobs/${id}`)
@@ -346,25 +346,25 @@ export const api = {
   // ── Applications ─────────────────────────────────────────────────────────
   applications: {
     list: () => req<{ applications: Application[]; count: number }>('/api/applications'),
-    get: (jobId: string) => req<Application>(`/api/applications/${jobId}`),
-    save: (jobId: string) => req<Application>(`/api/applications/${jobId}`, { method: 'PUT' }),
-    remove: (jobId: string) => req<{ message: string; cleanup_warning: string | null }>(`/api/applications/${jobId}`, { method: 'DELETE' }),
-    update: (jobId: string, data: Partial<ApplicationDetails>) =>
+    get: (jobId: number | string) => req<Application>(`/api/applications/${jobId}`),
+    save: (jobId: number | string) => req<Application>(`/api/applications/${jobId}`, { method: 'PUT' }),
+    remove: (jobId: number | string) => req<{ message: string; cleanup_warning: string | null }>(`/api/applications/${jobId}`, { method: 'DELETE' }),
+    update: (jobId: number | string, data: Partial<ApplicationDetails>) =>
       req<Application>(`/api/applications/${jobId}`, { method: 'PATCH', body: JSON.stringify(data) }),
-    generateDocs: (jobId: string) =>
-      req<QueuedRun & { application_id: string }>(`/api/applications/${jobId}/generate-docs`, {
+    generateDocs: (jobId: number | string) =>
+      req<QueuedRun & { application_id: number }>(`/api/applications/${jobId}/generate-docs`, {
         method: 'POST',
       }),
-    updateStatus: (jobId: string, status: ApplicationStatus, expectedStatus: ApplicationStatus, note?: string) =>
+    updateStatus: (jobId: number | string, status: ApplicationStatus, expectedStatus: ApplicationStatus, note?: string) =>
       req<Application>(`/api/applications/${jobId}/status`, {
         method: 'PATCH',
         body: JSON.stringify({ status, expected_status: expectedStatus, note: note || null }),
       }),
-    previewOnePager: (jobId: string) =>
+    previewOnePager: (jobId: number | string) =>
       `${BASE}/api/applications/${jobId}/preview/one-pager`,
-    downloadOnePager: (jobId: string) =>
+    downloadOnePager: (jobId: number | string) =>
       `${BASE}/api/applications/${jobId}/download/one-pager`,
-    downloadCoverLetter: (jobId: string) =>
+    downloadCoverLetter: (jobId: number | string) =>
       `${BASE}/api/applications/${jobId}/download/cover-letter`,
   },
 }

@@ -22,7 +22,7 @@ def serialize_event(event: AgentEvent) -> dict:
 
 
 @router.get("/events")
-async def events(run_id: str | None = None, limit: int = Query(50, ge=1, le=200), db=Depends(get_db)):
+async def events(run_id: int | None = None, limit: int = Query(50, ge=1, le=200), db=Depends(get_db)):
     query = select(AgentEvent)
     if run_id:
         query = query.where(AgentEvent.run_id == run_id)
@@ -44,7 +44,7 @@ async def list_runs(kind: str | None = None, status: str | None = None,
 
 
 @router.get("/{run_id}")
-async def get_run(run_id: str, db=Depends(get_db)):
+async def get_run(run_id: int, db=Depends(get_db)):
     run = await db.get(TaskRun, run_id)
     if not run:
         raise HTTPException(404, "Run not found")
@@ -53,7 +53,7 @@ async def get_run(run_id: str, db=Depends(get_db)):
 
 
 @router.post("/{run_id}/retry", status_code=202)
-async def retry_run(run_id: str, options: RetryOptions = RetryOptions(), db=Depends(get_db)):
+async def retry_run(run_id: int, options: RetryOptions = RetryOptions(), db=Depends(get_db)):
     previous = await db.get(TaskRun, run_id)
     if not previous:
         raise HTTPException(404, "Run not found")

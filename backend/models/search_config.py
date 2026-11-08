@@ -4,7 +4,6 @@ Stores what to search for across which portals.
 Users configure this once; the Search Agent reads it every run.
 """
 
-import uuid
 from datetime import datetime
 from sqlalchemy import String, DateTime, Boolean, JSON, Integer
 from sqlalchemy.orm import Mapped, mapped_column
@@ -13,11 +12,12 @@ from core.database import Base
 
 class SearchConfig(Base):
     __tablename__ = "search_configs"
+    __table_args__ = {"sqlite_autoincrement": True}
 
     name: Mapped[str] = mapped_column(String(100), default="Default search")
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
     )
 
     # What to search

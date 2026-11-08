@@ -108,7 +108,7 @@ async def list_search_configs(db: AsyncSession = Depends(get_db)):
 
 
 @router.put("/{config_id}")
-async def update_search_config(config_id: str, data: SearchConfigCreate, db: AsyncSession = Depends(get_db)):
+async def update_search_config(config_id: int, data: SearchConfigCreate, db: AsyncSession = Depends(get_db)):
     config = await db.get(SearchConfig, config_id)
     if not config:
         raise HTTPException(404, "Search configuration not found.")
@@ -137,7 +137,7 @@ pipeline_router = APIRouter(prefix="/api/pipeline", tags=["pipeline"])
 
 @pipeline_router.post("/run", status_code=202)
 async def run_pipeline(
-    config_id: str | None = None,
+    config_id: int | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """

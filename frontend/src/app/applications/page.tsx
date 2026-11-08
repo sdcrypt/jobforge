@@ -35,7 +35,7 @@ function ApplicationEditor({ application, onClose, onSaved, onDeleted }: {
   application: Application
   onClose: () => void
   onSaved: () => void
-  onDeleted: (jobId: string, message: string) => void
+  onDeleted: (jobId: number, message: string) => void
 }) {
   const [current, setCurrent] = useState(application)
   const [draft, setDraft] = useState(() => details(application))

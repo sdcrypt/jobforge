@@ -16,14 +16,14 @@ from models.run import TaskRun
 ACTIVE_STATUSES = ("queued", "running", "retrying")
 TERMINAL_STATUSES = ("succeeded", "partial", "failed")
 LEASE_SECONDS = 180
-current_run: ContextVar[tuple[str, str] | None] = ContextVar("current_run", default=None)
+current_run: ContextVar[tuple[int, str] | None] = ContextVar("current_run", default=None)
 
 
 class RunLost(RuntimeError):
     pass
 
 
-def active_key(kind: str, job_id: str | None = None) -> str:
+def active_key(kind: str, job_id: int | None = None) -> str:
     if kind in ("pipeline", "search", "rank"):
         return "discovery"
     return f"{kind}:{job_id or 'profile'}"
@@ -44,9 +44,9 @@ def run_response(run: TaskRun, created: bool) -> dict:
             else "Equivalent work is already queued or running. Follow its progress in Runs."}
 
 
-async def enqueue_run(db, kind: str, payload: dict | None = None, job_id: str | None = None,
-                      config_id: str | None = None, trigger: str = "manual",
-                      retry_of: str | None = None, parent_id: str | None = None,
+async def enqueue_run(db, kind: str, payload: dict | None = None, job_id: int | None = None,
+                      config_id: int | None = None, trigger: str = "manual",
+                      retry_of: int | None = None, parent_id: int | None = None,
                       dispatch: bool = True, max_attempts: int = 3) -> tuple[TaskRun, bool]:
     key = active_key(kind, job_id)
     payload = dict(payload or {})
@@ -78,10 +78,10 @@ async def enqueue_run(db, kind: str, payload: dict | None = None, job_id: str | 
     return run, True
 
 
-async def dispatch_run(run_id: str) -> None:
+async def dispatch_run(run_id: int) -> None:
     from workers.celery_app import celery_app
     try:
-        await asyncio.to_thread(celery_app.send_task, "workers.tasks.execute_run", args=[run_id], task_id=run_id)
+        await asyncio.to_thread(celery_app.send_task, "workers.tasks.execute_run", args=[run_id], task_id=str(run_id))
         values = {"dispatched_at": datetime.utcnow(), "dispatch_error": None}
     except Exception as exc:
         values = {"dispatch_error": f"Queue unavailable; dispatch will be retried: {str(exc)[:1000]}"}
@@ -129,7 +129,7 @@ async def stage(name: str, message: str, completed: int = 0, total: int = 0, don
     await ws_manager.emit_agent_event("pipeline", "done" if done else "thinking", message, {"stage": name, "completed": completed, "total": total})
 
 
-async def heartbeat(run_id: str, token: str) -> None:
+async def heartbeat(run_id: int, token: str) -> None:
     while True:
         await asyncio.sleep(15)
         async with database.AsyncSessionLocal() as db:
@@ -141,7 +141,7 @@ async def heartbeat(run_id: str, token: str) -> None:
                 return
 
 
-async def _finish(run_id: str, token: str, result: dict | None = None, error: Exception | None = None) -> None:
+async def _finish(run_id: int, token: str, result: dict | None = None, error: Exception | None = None) -> None:
     from models.application import AgentEvent
     async with database.AsyncSessionLocal() as db:
         run = (await db.execute(select(TaskRun).where(TaskRun.id == run_id).with_for_update())).scalar_one()
@@ -180,7 +180,11 @@ async def _finish(run_id: str, token: str, result: dict | None = None, error: Ex
                                       f"Run {run.status}: {run.error or 'work completed'}", {"run_status": run.status})
 
 
-async def execute_run(run_id: str) -> str:
+async def execute_run(run_id: int) -> str:
+    if not isinstance(run_id, int):
+        if not isinstance(run_id, str) or not run_id.isdecimal():
+            return "obsolete_id"
+        run_id = int(run_id)
     token = str(uuid.uuid4())
     now = datetime.utcnow()
     async with database.AsyncSessionLocal() as db:

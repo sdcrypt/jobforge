@@ -3,18 +3,18 @@ JobForge — UserProfile model
 The candidate's profile — used by all agents to personalise output.
 """
 
-import uuid
 from datetime import datetime
-from sqlalchemy import String, DateTime, Text, JSON
+from sqlalchemy import Integer, String, DateTime, Text, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 from core.database import Base
 
 
 class UserProfile(Base):
     __tablename__ = "user_profiles"
+    __table_args__ = {"sqlite_autoincrement": True}
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
     )
 
     # Personal

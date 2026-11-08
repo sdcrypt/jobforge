@@ -20,7 +20,7 @@ export default function RunsPage() {
   const [kind, setKind] = useState('')
   const [status, setStatus] = useState('')
   const [offset, setOffset] = useState(0)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<number | null>(null)
   const [retrying, setRetrying] = useState(false)
   const [maxAttempts, setMaxAttempts] = useState(3)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -29,7 +29,7 @@ export default function RunsPage() {
   const { data: history } = useSWR(selectedId ? ['run-events', selectedId] : null, () => api.runs.events(selectedId!), { refreshInterval: 3000 })
 
   useEffect(() => {
-    setSelectedId(new URLSearchParams(window.location.search).get('run'))
+    setSelectedId(Number(new URLSearchParams(window.location.search).get('run')) || null)
   }, [])
 
   async function retry(run: TaskRun) {
@@ -58,7 +58,7 @@ export default function RunsPage() {
       <table className="w-full text-left text-sm">
         <thead className="bg-slate-50 text-slate-500"><tr>{['Run', 'Status', 'Stage', 'Attempt', 'Created'].map(heading => <th key={heading} scope="col" className="p-3 font-medium">{heading}</th>)}</tr></thead>
         <tbody>{data?.runs.map(run => <tr key={run.id} className={`border-t ${selectedId === run.id ? 'bg-brand-50' : ''}`}>
-          <td className="p-3"><button className="text-left text-brand-700 hover:underline" onClick={() => { setSelectedId(run.id); setActionError(null) }}>{statusLabel(run.kind)} · {run.id.slice(0, 8)}</button>{(run.job_id || run.config_id) && <p className="mt-1 text-xs text-slate-700">{run.label}</p>}<p className="mt-1 text-xs text-slate-500">{run.trigger}{run.parent_id ? ' · part of pipeline' : ''}{run.retry_of ? ' · manual retry' : ''}</p></td>
+          <td className="p-3"><button className="text-left text-brand-700 hover:underline" onClick={() => { setSelectedId(run.id); setActionError(null) }}>{statusLabel(run.kind)} · {run.id}</button>{(run.job_id || run.config_id) && <p className="mt-1 text-xs text-slate-700">{run.label}</p>}<p className="mt-1 text-xs text-slate-500">{run.trigger}{run.parent_id ? ' · part of pipeline' : ''}{run.retry_of ? ' · manual retry' : ''}</p></td>
           <td className="p-3"><RunBadge status={run.status} /></td><td className="p-3 capitalize">{run.stage}</td><td className="p-3">{run.attempts}/{run.max_attempts}</td><td className="p-3 whitespace-nowrap text-xs">{formatDate(run.created_at)}</td>
         </tr>)}</tbody>
       </table>
@@ -78,7 +78,7 @@ export default function RunsPage() {
       {selected.error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{selected.error_type}: {selected.error}</p>}
       {selected.parent_id && <button className="text-sm text-brand-700 underline" onClick={() => setSelectedId(selected.parent_id)}>View parent pipeline</button>}
       {selected.retry_of && <button className="text-sm text-brand-700 underline" onClick={() => setSelectedId(selected.retry_of)}>View original run</button>}
-      {Boolean(selected.children?.length) && <section className="space-y-2"><h3 className="text-sm font-semibold">Related research tasks</h3>{selected.children?.map(child => <button key={child.id} onClick={() => setSelectedId(child.id)} className="mr-2 rounded border px-2 py-1 text-xs text-brand-700">{child.id.slice(0, 8)} · {child.status}</button>)}</section>}
+      {Boolean(selected.children?.length) && <section className="space-y-2"><h3 className="text-sm font-semibold">Related research tasks</h3>{selected.children?.map(child => <button key={child.id} onClick={() => setSelectedId(child.id)} className="mr-2 rounded border px-2 py-1 text-xs text-brand-700">{child.id} · {child.status}</button>)}</section>}
       <ol className="space-y-3">{selected.stages.map((entry, index) => <li key={`${entry.attempt}-${entry.name}-${index}`} className="rounded-lg border p-3 text-sm">
         <div className="flex justify-between gap-2"><span className="font-medium capitalize">{entry.name} · attempt {entry.attempt}</span><span className={entry.status === 'failed' ? 'text-red-700' : 'text-slate-500'}>{statusLabel(entry.status)}</span></div>
         <p className="mt-1 text-slate-600">{entry.message}</p>

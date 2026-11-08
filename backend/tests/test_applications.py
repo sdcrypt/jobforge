@@ -69,7 +69,7 @@ class ApplicationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first["document_status"], "not_started")
         self.assertEqual(len(second["status_history"]), 1)
         self.assertEqual(first["job"]["company"], "Example")
-        self.assertEqual((await self.client.put("/api/applications/missing")).status_code, 404)
+        self.assertEqual((await self.client.put("/api/applications/999999")).status_code, 404)
         self.assertEqual((await self.client.get("/api/applications")).json()["count"], 1)
 
     async def test_lifecycle_and_timeline_leave_job_processing_state_unchanged(self):
@@ -217,7 +217,7 @@ class ApplicationTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone((await session.execute(select(UserProfile))).scalar_one_or_none())
 
     async def test_delete_missing_application_does_not_remove_untracked_job(self):
-        self.assertEqual((await self.client.delete("/api/applications/missing")).status_code, 404)
+        self.assertEqual((await self.client.delete("/api/applications/999999")).status_code, 404)
         self.assertEqual((await self.client.delete(f"/api/applications/{self.job_id}")).status_code, 404)
         self.assertEqual((await self.client.get(f"/api/jobs/{self.job_id}")).status_code, 200)
 
@@ -303,13 +303,13 @@ class MigrationTests(unittest.IsolatedAsyncioTestCase):
             async with engine.begin() as connection:
                 await connection.run_sync(database.Base.metadata.create_all)
                 await connection.execute(Job.__table__.insert(), [
-                    {"id": "legacy-docs", "title": "Engineer", "company": "Example", "url": "https://example.com/1", "portal": "linkedin", "status": "applied"},
-                    {"id": "legacy-saved", "title": "Engineer", "company": "Other", "url": "https://example.com/2", "portal": "linkedin", "status": "saved"},
-                    {"id": "legacy-applied", "title": "Engineer", "company": "Third", "url": "https://example.com/3", "portal": "linkedin", "status": "ranked"},
+                    {"id": 1, "title": "Engineer", "company": "Example", "url": "https://example.com/1", "portal": "linkedin", "status": "applied"},
+                    {"id": 2, "title": "Engineer", "company": "Other", "url": "https://example.com/2", "portal": "linkedin", "status": "saved"},
+                    {"id": 3, "title": "Engineer", "company": "Third", "url": "https://example.com/3", "portal": "linkedin", "status": "ranked"},
                 ])
                 await connection.execute(Application.__table__.insert(), [
-                    {"job_id": "legacy-docs", "status": "ready", "one_pager_path": "resume.pdf", "apply_notes": "Existing application notes", "rejection_reason": None},
-                    {"job_id": "legacy-applied", "status": "applied", "one_pager_path": "submitted.pdf", "apply_notes": None, "rejection_reason": "Existing feedback"},
+                    {"job_id": 1, "status": "ready", "one_pager_path": "resume.pdf", "apply_notes": "Existing application notes", "rejection_reason": None},
+                    {"job_id": 3, "status": "applied", "one_pager_path": "submitted.pdf", "apply_notes": None, "rejection_reason": "Existing feedback"},
                 ])
                 for column in ["document_status", "document_error", "recruiter_name", "recruiter_email", "recruiter_phone", "notes", "preparation_notes", "outcome", "deadline_at", "follow_up_at", "follow_up_completed_at", "status_history"]:
                     await connection.execute(text(f"ALTER TABLE applications DROP COLUMN {column}"))
@@ -320,14 +320,14 @@ class MigrationTests(unittest.IsolatedAsyncioTestCase):
                 rows = (await session.execute(select(Application))).scalars().all()
                 by_job = {entry.job_id: entry for entry in rows}
                 self.assertEqual(len(rows), 3)
-                self.assertEqual(by_job["legacy-docs"].status, "applied")
-                self.assertEqual(by_job["legacy-docs"].document_status, "ready")
-                self.assertEqual(by_job["legacy-docs"].one_pager_path, "resume.pdf")
-                self.assertEqual(by_job["legacy-applied"].document_status, "ready")
-                self.assertEqual(by_job["legacy-docs"].notes, "Existing application notes")
-                self.assertEqual(by_job["legacy-applied"].outcome, "Existing feedback")
-                self.assertEqual(by_job["legacy-saved"].status, "saved")
-                self.assertEqual(len(by_job["legacy-docs"].status_history), 2)
-                self.assertEqual((await session.get(Job, "legacy-docs")).status, "new")
+                self.assertEqual(by_job[1].status, "applied")
+                self.assertEqual(by_job[1].document_status, "ready")
+                self.assertEqual(by_job[1].one_pager_path, "resume.pdf")
+                self.assertEqual(by_job[3].document_status, "ready")
+                self.assertEqual(by_job[1].notes, "Existing application notes")
+                self.assertEqual(by_job[3].outcome, "Existing feedback")
+                self.assertEqual(by_job[2].status, "saved")
+                self.assertEqual(len(by_job[1].status_history), 2)
+                self.assertEqual((await session.get(Job, 1)).status, "new")
         finally:
             await engine.dispose()

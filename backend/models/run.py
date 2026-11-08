@@ -1,4 +1,3 @@
-import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Integer, JSON, String, Text
@@ -9,15 +8,16 @@ from core.database import Base
 
 class TaskRun(Base):
     __tablename__ = "task_runs"
+    __table_args__ = {"sqlite_autoincrement": True}
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     kind: Mapped[str] = mapped_column(String(40), index=True)
     status: Mapped[str] = mapped_column(String(30), default="queued", index=True)
     active_key: Mapped[str | None] = mapped_column(String(200), unique=True, nullable=True)
-    job_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
-    config_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
-    parent_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
-    retry_of: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    job_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    config_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    parent_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    retry_of: Mapped[int | None] = mapped_column(Integer, nullable=True)
     trigger: Mapped[str] = mapped_column(String(30), default="manual")
     payload: Mapped[dict] = mapped_column(JSON, default=dict)
     stage: Mapped[str] = mapped_column(String(60), default="queued")

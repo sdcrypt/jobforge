@@ -3,18 +3,18 @@ JobForge — Job model
 Stores every job found across all portals.
 """
 
-import uuid
 from datetime import datetime
-from sqlalchemy import String, Float, DateTime, Text, Boolean, JSON
+from sqlalchemy import Integer, String, Float, DateTime, Text, Boolean, JSON
 from sqlalchemy.orm import Mapped, mapped_column
 from core.database import Base
 
 
 class Job(Base):
     __tablename__ = "jobs"
+    __table_args__ = {"sqlite_autoincrement": True}
 
-    id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid.uuid4())
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
     )
 
     # Core job info

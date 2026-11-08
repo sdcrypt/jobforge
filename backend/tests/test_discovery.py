@@ -151,7 +151,7 @@ class DiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.json()["run"]["config_id"], second)
         self.assertEqual(response.json()["run"]["label"], "Singapore Lead")
-        self.assertEqual((await self.client.post("/api/pipeline/run?config_id=missing")).status_code, 400)
+        self.assertEqual((await self.client.post("/api/pipeline/run?config_id=999999")).status_code, 400)
 
     async def test_scheduler_keeps_profiles_independent_and_selects_oldest_due(self):
         from workers.scheduler import tick

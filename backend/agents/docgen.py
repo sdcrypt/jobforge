@@ -85,7 +85,7 @@ class DocGenAgent(BaseAgent):
     name = "docgen"
     model = settings.llm_model_smart
 
-    def __init__(self, db=None, job_id: str | None = None):
+    def __init__(self, db=None, job_id: int | None = None):
         super().__init__(db=db, job_id=job_id)
         template_dir = Path(__file__).parent.parent / "templates"
         self.jinja = Environment(

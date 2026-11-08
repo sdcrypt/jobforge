@@ -116,7 +116,7 @@ class ApplyAgent(BaseAgent):
                         log.debug("apply.fill_failed", field=field.get("label"), error=str(e))
 
             # Step 5: Screenshot for user review
-            screenshot_path = f"./documents/apply_preview_{job.id[:8]}.png"
+            screenshot_path = f"./documents/apply_preview_{job.id}.png"
             await page.screenshot(path=screenshot_path, full_page=True)
 
             await self.emit(

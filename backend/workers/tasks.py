@@ -26,7 +26,7 @@ def run_async(coroutine):
 
 
 @celery_app.task(name="workers.tasks.execute_run", acks_late=True, reject_on_worker_lost=True)
-def execute_run(run_id: str):
+def execute_run(run_id: int):
     ensure_app_path()
     from core.runs import execute_run as execute
     return run_async(execute(run_id))
