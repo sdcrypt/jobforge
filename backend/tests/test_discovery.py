@@ -226,6 +226,38 @@ class DiscoveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(count, 0)
             self.assertEqual(existing.salary_min, 110000)
 
+    async def test_longer_description_is_persisted_and_invalidates_old_analysis(self):
+        from agents.pipeline import store_jobs
+        description = "Detailed requirements. " * 1000 + "Final requirement."
+        async with self.sessions() as db:
+            job = (await db.execute(select(Job).where(Job.url == "https://example.com/0"))).scalar_one()
+            job.description = "Old snippet"
+            job.researched_at = datetime.utcnow()
+            await db.commit()
+            self.assertEqual(await store_jobs(db, [{"url": job.url, "description": description}]), 0)
+            await db.commit()
+            job_id = job.id
+        async with self.sessions() as db:
+            stored = await db.get(Job, job_id)
+            self.assertEqual(stored.description, description)
+            self.assertIsNone(stored.fit_score)
+            self.assertIsNone(stored.researched_at)
+            self.assertEqual(stored.description_source, "feed")
+
+    async def test_retrieved_description_survives_ai_failure(self):
+        from agents.research import ResearchAgent
+        description = "Detailed requirements. " * 1000 + "Final requirement."
+        async with self.sessions() as db:
+            job = (await db.execute(select(Job).where(Job.url == "https://example.com/0"))).scalar_one()
+            agent = ResearchAgent(db=db)
+            agent.emit = AsyncMock()
+            with patch.object(agent, "_fetch_description", new=AsyncMock(return_value=description)), patch.object(agent, "_analyse", new=AsyncMock(side_effect=RuntimeError("AI unavailable"))):
+                with self.assertRaisesRegex(RuntimeError, "AI unavailable"):
+                    await agent.run(job.id, {})
+            job_id = job.id
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(Job, job_id)).description, description)
+
     async def test_one_failed_portal_retains_successful_results_and_reports_partial(self):
         from agents.search import SearchAgent
         from workers.scheduler import snapshot

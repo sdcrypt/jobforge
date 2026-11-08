@@ -9,8 +9,6 @@ Steps:
   4. Persist everything back to the Job record
 """
 
-import httpx
-from bs4 import BeautifulSoup
 from datetime import datetime
 from sqlalchemy import select
 
@@ -21,9 +19,6 @@ from models.job import Job
 import structlog
 
 log = structlog.get_logger()
-
-# HTML tags that carry no useful job-description text
-_SKIP_TAGS = {"script", "style", "nav", "footer", "header", "aside", "noscript", "form"}
 
 
 class ResearchAgent(BaseAgent):
@@ -48,20 +43,11 @@ class ResearchAgent(BaseAgent):
 
         await self.emit("thinking", f"Analysing \"{job.title}\" at {job.company}…")
 
-        # 2. Get description — use stored text or try to scrape the full page
-        description = job.description or ""
-        if len(description) < 200 and job.portal != "manual":
-            await self.emit("thinking", "Fetching full job description from posting URL…")
-            fetched = await self._fetch_description(job.url)
-            if fetched:
-                description = fetched
-                log.info("research.description_fetched", chars=len(description))
-
+        from core.job_descriptions import ensure_description
+        description = await ensure_description(job, self.emit, fetcher=self._fetch_description)
+        await commit_owned(self.db)
         if not description:
-            description = (
-                f"{job.title} at {job.company} "
-                f"({job.location or 'location not specified'})"
-            )
+            description = f"{job.title} at {job.company}. Description unavailable; state this limitation and do not invent requirements."
 
         # 3. LLM analysis
         await self.emit("thinking", "Running AI fit analysis…")
@@ -78,10 +64,6 @@ class ResearchAgent(BaseAgent):
         job.fit_summary    = analysis.get("fit_summary", "")
         job.talking_points = analysis.get("talking_points", [])
         job.researched_at  = datetime.utcnow()
-        # Cache description if we didn't have it before
-        if description and not job.description:
-            job.description = description[:4000]
-
         await commit_owned(self.db)
         await self.db.refresh(job)
 
@@ -108,47 +90,8 @@ class ResearchAgent(BaseAgent):
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     async def _fetch_description(self, url: str) -> str:
-        """
-        Try to fetch the full job description from the posting URL.
-        Returns plain text (≤5 000 chars), or "" on any failure.
-        Works for most portals; LinkedIn / gated portals will return partial text.
-        """
-        try:
-            async with httpx.AsyncClient(
-                timeout=12,
-                follow_redirects=True,
-                headers={
-                    "User-Agent": (
-                        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                        "AppleWebKit/537.36 (KHTML, like Gecko) "
-                        "Chrome/124.0.0.0 Safari/537.36"
-                    ),
-                    "Accept":          "text/html,application/xhtml+xml,*/*;q=0.8",
-                    "Accept-Language": "en-US,en;q=0.9",
-                },
-            ) as client:
-                resp = await client.get(url)
-                if resp.status_code != 200:
-                    return ""
-
-                soup = BeautifulSoup(resp.text, "html.parser")
-                for tag in soup.find_all(_SKIP_TAGS):
-                    tag.decompose()
-
-                # Prefer a clearly labelled description section
-                main = (
-                    soup.find("main")
-                    or soup.find(attrs={"id": lambda i: i and "description" in i.lower()})
-                    or soup.find(class_=lambda c: c and "description" in c.lower())
-                    or soup.find(class_=lambda c: c and "job-detail" in c.lower())
-                    or soup.body
-                )
-
-                text = (main or soup).get_text(separator=" ", strip=True)
-                return " ".join(text.split())[:5000]   # collapse whitespace, cap length
-        except Exception as e:
-            log.debug("research.fetch_failed", url=url[:80], error=str(e))
-            return ""
+        from core.job_descriptions import fetch_description
+        return await fetch_description(url)
 
     async def _analyse(self, job: Job, description: str, profile: dict) -> dict:
         """Ask the LLM to score the job fit and return structured JSON."""
@@ -193,7 +136,7 @@ Title: {job.title}
 Company: {job.company}
 Location: {job.location or 'Not specified'}{' (Remote)' if job.remote else ''}
 Description:
-{description[:3000]}
+{description}
 
 Return exactly this JSON — all fields are required:
 {{

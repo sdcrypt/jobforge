@@ -9,6 +9,7 @@ from core.config import settings
 from agents.base import BaseAgent
 from models.job import Job
 from models.profile import UserProfile
+from core.job_descriptions import ensure_description
 import structlog
 
 log = structlog.get_logger()
@@ -75,13 +76,14 @@ class RankAgent(BaseAgent):
         return all_scores
 
     async def _score_job(self, job: Job, profile_summary: str) -> dict:
+        description = await ensure_description(job, self.emit)
         job_summary = (
             f"Title: {job.title}\n"
             f"Company: {job.company}\n"
             f"Location: {job.location} (Remote: {job.remote})\n"
             f"Type: {job.job_type}\n"
             f"Salary: {job.salary_range or 'not specified'}\n"
-            f"Description: {(job.description or '')[:500]}"
+            f"Description: {description or 'Description unavailable; assess only the supplied metadata and state the limitations.'}"
         )
         messages = [
             self.system(SCORE_PROMPT),

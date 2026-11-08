@@ -249,6 +249,10 @@ export default function JobCard({ job, onRefresh }: Props) {
         strengths:      result.strengths,
         gaps:           result.gaps,
         researched_at:  result.researched_at,
+        description: result.description,
+        description_source: result.description_source,
+        description_checked_at: result.description_checked_at,
+        description_error: result.description_error,
       }))
       setShowPanel(true)
       onRefresh?.()   // background refresh so list re-sorts by score
@@ -496,6 +500,7 @@ export default function JobCard({ job, onRefresh }: Props) {
       </div>
       <section className="border-t border-slate-100 pt-5">
         <h3 className="mb-2 text-sm font-semibold">Job description</h3>
+        {localJob.description_error && <p role="status" className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">The full listing could not be retrieved. Showing the available text, which may be incomplete.</p>}
         <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-600">{localJob.description || 'No description stored. Open the original listing for the full requirements.'}</p>
         <p className="mt-4 text-xs text-slate-400">{localJob.posted_at ? `Posted ${formatDate(localJob.posted_at)}` : `Discovered ${formatDate(localJob.found_at)}`}</p>
       </section>

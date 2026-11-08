@@ -22,6 +22,7 @@ from contextvars import ContextVar
 from dateutil import parser as dateutil_parser
 from core.config import settings
 from agents.base import BaseAgent
+from core.job_descriptions import plain_text
 import structlog
 
 log = structlog.get_logger()
@@ -348,7 +349,7 @@ class SearchAgent(BaseAgent):
                 "salary_currency": "USD" if lo or hi else None,
                 "salary_period": "year" if lo or hi else None,
                 "job_type":    "full-time",
-                "description": BeautifulSoup(job.get("description", ""), "html.parser").get_text()[:500],
+                "description": plain_text(job.get("description", "")),
                 "posted_at":   _safe_date(job.get("date")),
                 "status":      "new",
             })
@@ -414,7 +415,7 @@ class SearchAgent(BaseAgent):
                     "portal":   "weworkremotely",
                     "remote":   True,
                     "job_type": "full-time",
-                    "description": desc_text[:500],
+                    "description": desc_text,
                     "posted_at": _safe_date(pub_el.get_text(strip=True) if pub_el else None),
                     "status":   "new",
                 })
@@ -499,7 +500,7 @@ class SearchAgent(BaseAgent):
                 "portal":      "hackernews",
                 "remote":      "remote" in text.lower(),
                 "job_type":    "full-time",
-                "description": text[:500],
+                "description": text,
                 "posted_at":   _safe_date(hit.get("created_at")),
                 "status":      "new",
             })

@@ -100,6 +100,11 @@ class DocGenAgent(BaseAgent):
             f"Generating documents for {job.title} at {job.company}...",
         )
 
+        from core.job_descriptions import ensure_description
+        from core.runs import commit_owned
+        await ensure_description(job, self.emit)
+        if self.db is not None:
+            await commit_owned(self.db)
         profile_ctx = self._build_profile_context(profile)
         job_ctx = self._build_job_context(job)
 
@@ -268,7 +273,7 @@ class DocGenAgent(BaseAgent):
             f"(Remote: {job.remote})\n"
             f"Type: {job.job_type or 'Not specified'}\n"
             f"Salary: {job.salary_range or 'Not specified'}\n"
-            f"Description:\n{(job.description or '')[:1500]}"
+            f"Description:\n{job.description or 'Description unavailable. Do not invent job requirements.'}"
         )
 
     @staticmethod

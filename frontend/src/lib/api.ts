@@ -25,6 +25,9 @@ export interface Job {
   title: string
   company: string
   description: string | null
+  description_source: string | null
+  description_checked_at: string | null
+  description_error: string | null
   location: string | null
   url: string
   portal: string

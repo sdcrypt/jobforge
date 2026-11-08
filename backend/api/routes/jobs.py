@@ -84,7 +84,7 @@ async def import_job(data: ManualJob, db: AsyncSession = Depends(get_db)):
     values["url"] = data.url or f"manual:{uuid.uuid4()}"
     if not data.salary_range and (data.salary_min is not None or data.salary_max is not None):
         values["salary_range"] = f"{data.salary_currency} {data.salary_min if data.salary_min is not None else '?'}–{data.salary_max if data.salary_max is not None else '?'} / {data.salary_period}"
-    job = Job(**values, portal="manual", status="new")
+    job = Job(**values, portal="manual", status="new", description_source="manual")
     db.add(job)
     try:
         await db.commit()

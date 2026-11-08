@@ -131,6 +131,11 @@ async def store_jobs(db: AsyncSession, raw_jobs: list[dict]) -> int:
         existing_url = await db.execute(select(Job).where(Job.url == url))
         existing = existing_url.scalar_one_or_none()
         if existing:
+            if existing.portal != "manual":
+                from core.job_descriptions import replace_description
+                if replace_description(existing, j.get("description") or "", "feed"):
+                    existing.description_checked_at = None
+                    existing.description_error = None
             for field in ("salary_min", "salary_max", "salary_currency", "salary_period"):
                 if getattr(existing, field) is None and j.get(field) is not None:
                     setattr(existing, field, j[field])
@@ -149,7 +154,10 @@ async def store_jobs(db: AsyncSession, raw_jobs: list[dict]) -> int:
             if existing_pair.scalar_one_or_none():
                 continue
 
-        db.add(Job(**{k: v for k, v in j.items() if hasattr(Job, k)}))
+        values = {key: value for key, value in j.items() if hasattr(Job, key)}
+        if values.get("description"):
+            values["description_source"] = "feed"
+        db.add(Job(**values))
         new_count += 1
 
     await db.flush()

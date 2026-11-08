@@ -54,6 +54,9 @@ async def init_db():
             else "DATETIME"
         )
         _new_columns = [
+            ("jobs", "description_source", "VARCHAR(20)"),
+            ("jobs", "description_checked_at", datetime_type),
+            ("jobs", "description_error", "TEXT"),
             ("jobs", "salary_min", "FLOAT"),
             ("jobs", "salary_max", "FLOAT"),
             ("jobs", "salary_currency", "VARCHAR(3)"),

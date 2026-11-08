@@ -51,6 +51,9 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         sender = patch("workers.celery_app.celery_app.send_task")
         self.sender = sender.start()
         self.addCleanup(sender.stop)
+        descriptions = patch("core.job_descriptions.fetch_description", new=AsyncMock(return_value="Job requirements. " * 30))
+        descriptions.start()
+        self.addCleanup(descriptions.stop)
         await database.init_db()
         app = FastAPI()
         for router in (routes.router, pipeline_router, search_router, jobs.router, applications.router, profile.router):
