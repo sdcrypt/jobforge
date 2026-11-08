@@ -155,7 +155,7 @@ Run backend tests with `docker compose exec backend python -m unittest discover 
 To try this in the UI after rebuilding with `docker compose up -d --build`:
 1. Open **Jobs**, combine keyword/company/portal/location filters, and use Next/Previous or change the page size. Counts and ordering apply across all matches, not just the loaded page.
 2. Choose **Add job manually**, paste a description, enter title/company and optional salary, then Add job. It appears under Manually added; Research evaluates the pasted requirements. Adding the same listing URL again displays a duplicate warning.
-3. Save that job and open the **Saved** tab. Adjust salary currency/period and posted-date filters; unknown values are excluded when those filters require known data.
+3. Click the job title or **View job details** to open its details. Save job, Mark applied, Original listing, Research/Analysis, and document actions are available there. Save the job and open the **Saved** tab. Adjust salary currency/period and posted-date filters; unknown values are excluded when those filters require known data.
 4. In **Search Config**, create two named configurations, switch between them, edit one, and confirm both remain available. Use **Save & Run This Config**, then open **Runs** to check its name, stages, and portal reports. Pausing scheduling does not prevent an explicit manual run.
 
 ### Reliable Runs

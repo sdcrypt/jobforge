@@ -24,6 +24,7 @@ export interface Job {
   id: number
   title: string
   company: string
+  description: string | null
   location: string | null
   url: string
   portal: string
