@@ -57,6 +57,7 @@ def sentence_status(sentence):
     positive = bool(POSITIVE.search(value))
     if value.endswith("?"):
         return None
+
     transfer = bool(TRANSFER.search(value))
     # A possible offer or a visa transfer has limits, so it is conditional.
     if re.search(r"\bsponsorship\b.{0,30}\bnot guaranteed\b|\bcannot guarantee\b.{0,30}\bsponsorship\b", value, re.I):
