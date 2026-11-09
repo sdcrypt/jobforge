@@ -29,8 +29,11 @@ class ResearchAgent(BaseAgent):
 
     async def run(self, job_id: int, profile: dict) -> dict:
         """
-        Analyse a job posting against the user's profile.
-        Updates the Job record in DB and returns the analysis dict.
+        Check the description, assess sponsorship, then analyse the candidate's fit.
+
+        Save the description and sponsorship evidence before asking AI for fit
+        scores, so that useful data survives if the later AI request fails.
+        Return the assessment and fit results for the run history.
         """
         await self.emit("started", f"Starting research on job {job_id}…")
 
@@ -45,6 +48,8 @@ class ResearchAgent(BaseAgent):
 
         from core.job_descriptions import ensure_description
         description = await ensure_description(job, self.emit, fetcher=self._fetch_description)
+        from agents.sponsorship import SponsorshipAgent
+        await SponsorshipAgent(db=self.db, job_id=job.id).run(job)
         await commit_owned(self.db)
         if not description:
             description = f"{job.title} at {job.company}. Description unavailable; state this limitation and do not invent requirements."
@@ -75,6 +80,9 @@ class ResearchAgent(BaseAgent):
         )
 
         return {
+            "sponsorship": {"status": job.sponsorship_status, "evidence": job.sponsorship_evidence,
+                            "needs_review": job.sponsorship_needs_review, "method": job.sponsorship_method,
+                            "notes": job.sponsorship_notes},
             "fit_score":      job.fit_score,
             "tech_score":     job.tech_score,
             "exp_score":      job.exp_score,
@@ -90,11 +98,16 @@ class ResearchAgent(BaseAgent):
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     async def _fetch_description(self, url: str) -> str:
+        """Use the shared listing reader so all agents collect text the same way."""
         from core.job_descriptions import fetch_description
         return await fetch_description(url)
 
     async def _analyse(self, job: Job, description: str, profile: dict) -> dict:
-        """Ask the LLM to score the job fit and return structured JSON."""
+        """Send the supplied job text to AI and check that its fit scores are usable.
+
+        Keep the candidate profile brief, but do not shorten the job description.
+        Reject missing fields and keep scores between 0 and 100.
+        """
 
         # Compact profile strings for the prompt
         skills_str = ", ".join(

@@ -118,6 +118,12 @@ async def run_pipeline(db: AsyncSession, config_data: dict | None = None, config
 
 
 async def store_jobs(db: AsyncSession, raw_jobs: list[dict]) -> int:
+    """Save new listings and return how many were added.
+
+    Skip existing URLs or company/title pairs instead of creating duplicates.
+    A matching URL can supply a longer description and missing salary data.
+    Assess new descriptions with sponsorship rules; the caller commits the work.
+    """
     # Primary dedup: exact URL match (DB unique constraint)
     # Secondary dedup: same company + same title (catches URL variants / LinkedIn
     #   returning the same job for different keyword/location combos)
@@ -157,7 +163,10 @@ async def store_jobs(db: AsyncSession, raw_jobs: list[dict]) -> int:
         values = {key: value for key, value in j.items() if hasattr(Job, key)}
         if values.get("description"):
             values["description_source"] = "feed"
-        db.add(Job(**values))
+        from core.sponsorship import update_sponsorship
+        job = Job(**values)
+        update_sponsorship(job)
+        db.add(job)
         new_count += 1
 
     await db.flush()

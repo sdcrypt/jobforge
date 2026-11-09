@@ -54,6 +54,13 @@ async def init_db():
             else "DATETIME"
         )
         _new_columns = [
+            ("jobs", "sponsorship_status", "VARCHAR(30) DEFAULT 'not_specified'"),
+            ("jobs", "sponsorship_evidence", json_type),
+            ("jobs", "sponsorship_needs_review", "BOOLEAN DEFAULT FALSE"),
+            ("jobs", "sponsorship_method", "VARCHAR(20)"),
+            ("jobs", "sponsorship_notes", "TEXT"),
+            ("jobs", "sponsorship_checked_at", datetime_type),
+            ("jobs", "sponsorship_description_hash", "VARCHAR(64)"),
             ("jobs", "description_source", "VARCHAR(20)"),
             ("jobs", "description_checked_at", datetime_type),
             ("jobs", "description_error", "TEXT"),
@@ -96,6 +103,18 @@ async def init_db():
 
         application_table = Application.__table__
         job_table = Job.__table__
+        from core.sponsorship import assessment_values, classify, description_hash
+        # Give existing jobs a rules-only assessment without making AI requests at startup.
+        unclassified = (await conn.execute(select(job_table.c.id, job_table.c.description, job_table.c.updated_at,
+                                                job_table.c.sponsorship_description_hash))).mappings().all()
+        for job in unclassified:
+            # Keep a saved assessment, including its AI review, when nothing has changed.
+            if job["sponsorship_description_hash"] == description_hash(job["description"]):
+                continue
+            # Preserve the job's update date while filling these assessment fields.
+            await conn.execute(job_table.update().where(job_table.c.id == job["id"]).values(
+                **assessment_values(job["description"], classify(job["description"])), updated_at=job["updated_at"]
+            ))
         rows = (await conn.execute(select(application_table))).mappings().all()
         for row in rows:
             values = {}

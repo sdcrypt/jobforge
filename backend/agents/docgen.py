@@ -94,7 +94,11 @@ class DocGenAgent(BaseAgent):
         )
 
     async def run(self, job: Job, profile: UserProfile) -> dict:
-        """Generate one-pager + cover letter for a specific job."""
+        """Generate a tailored resume and cover letter from the available job text.
+
+        Save any improved description before generating documents. Build both
+        prompts from the same complete stored description, then render the files.
+        """
         await self.emit(
             "started",
             f"Generating documents for {job.title} at {job.company}...",
@@ -266,6 +270,7 @@ class DocGenAgent(BaseAgent):
 
     @staticmethod
     def _build_job_context(job: Job) -> str:
+        """Format job details for AI without shortening the stored description."""
         return (
             f"Title: {job.title}\n"
             f"Company: {job.company}\n"

@@ -76,6 +76,11 @@ class ManualJob(BaseModel):
 
 @router.post("/import", status_code=201)
 async def import_job(data: ManualJob, db: AsyncSession = Depends(get_db)):
+    """Save a manually entered job and assess sponsorship in the pasted text.
+
+    Keep the URL as a reference without fetching it. Reject duplicate URLs,
+    and leave application tracking to the separate Save job / Mark applied actions.
+    """
     if data.url:
         existing = (await db.execute(select(Job).where(Job.url == data.url))).scalar_one_or_none()
         if existing:
@@ -85,6 +90,8 @@ async def import_job(data: ManualJob, db: AsyncSession = Depends(get_db)):
     if not data.salary_range and (data.salary_min is not None or data.salary_max is not None):
         values["salary_range"] = f"{data.salary_currency} {data.salary_min if data.salary_min is not None else '?'}–{data.salary_max if data.salary_max is not None else '?'} / {data.salary_period}"
     job = Job(**values, portal="manual", status="new", description_source="manual")
+    from core.sponsorship import update_sponsorship
+    update_sponsorship(job)
     db.add(job)
     try:
         await db.commit()

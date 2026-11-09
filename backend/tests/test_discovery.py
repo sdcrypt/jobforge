@@ -138,6 +138,45 @@ class DiscoveryTests(unittest.IsolatedAsyncioTestCase):
             await _cleanup_stale_jobs(db, 1)
             self.assertIsNotNone(await db.get(Job, response.json()["id"]))
 
+    async def test_manual_sponsorship_classification_and_evidence_are_persisted(self):
+        for description, expected in (("We offer visa sponsorship.", "mentioned"), ("We cannot provide visa sponsorship.", "not_available"), ("Visa sponsorship may be available.", "conditional"), ("Relocation assistance provided.", "not_specified")):
+            imported = await self.client.post("/api/jobs/import", json={"title": "Engineer", "company": "Example", "description": description})
+            self.assertEqual(imported.status_code, 201)
+            stored = (await self.client.get(f"/api/jobs/{imported.json()['id']}")).json()
+            self.assertEqual(stored["sponsorship_status"], expected)
+            if expected != "not_specified":
+                self.assertEqual(stored["sponsorship_evidence"][0]["quote"], description)
+
+    async def test_existing_descriptions_get_rules_backfill_without_ai(self):
+        async with self.sessions() as db:
+            job = (await db.execute(select(Job).where(Job.url == "https://example.com/0"))).scalar_one()
+            job.description = "We cannot provide visa sponsorship."
+            job.sponsorship_description_hash = None
+            await db.commit()
+            job_id = job.id
+        await database.init_db()
+        await database.init_db()
+        async with self.sessions() as db:
+            job = await db.get(Job, job_id)
+            self.assertEqual(job.sponsorship_status, "not_available")
+            self.assertEqual(len(job.sponsorship_evidence), 1)
+
+    async def test_research_persists_validated_ai_sponsorship_evidence(self):
+        from agents.research import ResearchAgent
+        description = "Immigration matters can be discussed with the recruiter."
+        imported = await self.client.post("/api/jobs/import", json={"title": "Engineer", "company": "Example", "description": description})
+        job_id = imported.json()["id"]
+        async with self.sessions() as db:
+            agent = ResearchAgent(db=db)
+            agent.emit = AsyncMock()
+            with patch("agents.sponsorship.SponsorshipAgent.chat_json", new=AsyncMock(return_value={"status": "not_specified", "quotes": [description]})), patch.object(agent, "_analyse", new=AsyncMock(return_value={"fit_score": 80})):
+                result = await agent.run(job_id, {})
+                self.assertEqual(result["sponsorship"]["method"], "rules+ai")
+        stored = (await self.client.get(f"/api/jobs/{job_id}")).json()
+        self.assertEqual(stored["sponsorship_status"], "not_specified")
+        self.assertTrue(stored["sponsorship_needs_review"])
+        self.assertEqual(stored["sponsorship_evidence"][0]["quote"], description)
+
     async def test_named_configurations_update_in_place_and_explicit_run(self):
         original = {"name": "Germany Backend", "keywords": ["Python"], "locations": ["Germany"], "run_every_hours": 0}
         first = (await self.client.post("/api/search-config", json=original)).json()["id"]

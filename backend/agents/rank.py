@@ -76,6 +76,11 @@ class RankAgent(BaseAgent):
         return all_scores
 
     async def _score_job(self, job: Job, profile_summary: str) -> dict:
+        """Load the available description and ask AI to score it against the profile.
+
+        Pass the entire returned description, including requirements near its end.
+        Sponsorship is assessed separately and is not added to the fit score here.
+        """
         description = await ensure_description(job, self.emit)
         job_summary = (
             f"Title: {job.title}\n"
