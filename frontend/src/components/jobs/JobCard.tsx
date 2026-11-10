@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Application, ApplicationStatus, Job, api } from '@/lib/api'
 import { formatDate, statusLabel } from '@/lib/applications'
 import clsx from 'clsx'
+import SponsorshipBadge from './SponsorshipBadge'
 
 interface Props {
   job: Job
@@ -253,6 +254,9 @@ export default function JobCard({ job, onRefresh }: Props) {
         description_source: result.description_source,
         description_checked_at: result.description_checked_at,
         description_error: result.description_error,
+        sponsorship_status: result.sponsorship_status,
+        sponsorship_checked_at: result.sponsorship_checked_at,
+        sponsorship_needs_review: result.sponsorship_needs_review,
       }))
       setShowPanel(true)
       onRefresh?.()   // background refresh so list re-sorts by score
@@ -288,6 +292,7 @@ export default function JobCard({ job, onRefresh }: Props) {
             {statusLabel(application.status)}
           </Link>
         )}
+        <SponsorshipBadge job={localJob} />
         <span className="text-xs bg-slate-100 text-slate-600 rounded px-2 py-0.5 capitalize">
           {localJob.portal === 'manual' ? 'Manually added' : localJob.portal}
         </span>

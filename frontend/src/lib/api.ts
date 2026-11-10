@@ -20,6 +20,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+export type SponsorshipStatus = 'mentioned' | 'conditional' | 'not_available' | 'not_specified'
+
 export interface Job {
   id: number
   title: string
@@ -28,6 +30,9 @@ export interface Job {
   description_source: string | null
   description_checked_at: string | null
   description_error: string | null
+  sponsorship_status: SponsorshipStatus | null
+  sponsorship_checked_at: string | null
+  sponsorship_needs_review: boolean
   location: string | null
   url: string
   portal: string
