@@ -17,9 +17,9 @@ const BADGES: Record<SponsorshipStatus, { label: string; color: string; explanat
     explanation: 'The listing explicitly states that sponsorship is unavailable.',
   },
   not_specified: {
-    label: 'Not specified',
+    label: 'Sponsorship unclear',
     color: 'border-slate-200 bg-slate-100 text-slate-600',
-    explanation: 'The description was assessed, but no clear sponsorship decision was established.',
+    explanation: 'The listing does not clearly confirm or rule out visa sponsorship.',
   },
 }
 
