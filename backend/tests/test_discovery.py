@@ -146,6 +146,8 @@ class DiscoveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(stored["sponsorship_status"], expected)
             if expected != "not_specified":
                 self.assertEqual(stored["sponsorship_evidence"][0]["quote"], description)
+                self.assertTrue(stored["sponsorship_evidence"][0]["reason"])
+                self.assertTrue(stored["sponsorship_evidence"][0]["triggers"])
 
     async def test_existing_descriptions_get_rules_backfill_without_ai(self):
         async with self.sessions() as db:

@@ -11,7 +11,7 @@ from datetime import datetime
 
 STATUSES = {"mentioned", "conditional", "not_available", "not_specified"}
 # Increase this version when changing rules so saved assessments are checked again.
-CLASSIFIER_VERSION = "1"
+CLASSIFIER_VERSION = "2"
 # These patterns look for relevant words, refusals, offers, and restrictions.
 INTEREST = re.compile(r"\b(?:visa|sponsor\w*|immigration|work permits?|h[- ]?1b)\b", re.I)
 NEGATIVE = re.compile(
@@ -38,46 +38,65 @@ def sentences(description):
     return [part.strip() for part in re.split(r"(?<=[.!?;])\s+|\n+", description or "") if part.strip()]
 
 
-def sentence_status(sentence):
-    """Classify one sentence, or return None when it does not give a clear answer.
+def decision(status, reason, *phrases):
+    """Keep the category together with the wording that caused the decision."""
+    return {"status": status, "reason": reason, "triggers": list(dict.fromkeys(phrases))}
 
-    Check refusals and restrictions before accepting a positive statement.
-    None means this sentence is not enough to classify the job.
-    """
+
+def sentence_decision(sentence):
+    """Explain the rule used for this sentence, or return None if it is unclear."""
     value = normalize(sentence)
-    # Not needing sponsorship is different from an employer refusing to offer it.
     if NOT_NEEDED.search(value):
         return None
     if re.search(r"\b(?:for other (?:roles|positions)|by (?:other|some) (?:employers|companies))\b", value, re.I):
         return None
-    negative = bool(NEGATIVE.search(value) or re.search(r"\bnot for (?:this|the|our) (?:role|position|vacancy|job)\b|\bsponsorship\s+(?:is\s+)?never\s+(?:available|offered|provided|supported)\b", value, re.I))
-    # Past sponsorship does not prove that this vacancy offers it today.
+    negative = NEGATIVE.search(value) or re.search(r"\bnot for (?:this|the|our) (?:role|position|vacancy|job)\b|\bsponsorship\s+(?:is\s+)?never\s+(?:available|offered|provided|supported)\b", value, re.I)
     if HISTORICAL.search(value) and not negative:
         return None
-    positive = bool(POSITIVE.search(value))
+    positive = POSITIVE.search(value)
     if value.endswith("?"):
         return None
 
-    transfer = bool(TRANSFER.search(value))
-    # A possible offer or a visa transfer has limits, so it is conditional.
-    if re.search(r"\bsponsorship\b.{0,30}\bnot guaranteed\b|\bcannot guarantee\b.{0,30}\bsponsorship\b", value, re.I):
-        return "conditional"
+    guarantee = re.search(r"\bsponsorship\b.{0,30}\bnot guaranteed\b|\bcannot guarantee\b.{0,30}\bsponsorship\b", value, re.I)
+    if guarantee:
+        phrase = guarantee.group()
+        return decision("conditional", f'The wording “{phrase}” makes sponsorship uncertain rather than an unconditional offer.', phrase)
+    transfer = TRANSFER.search(value)
     transfer_refused = re.search(r"\b(?:do not|cannot|can't|will not|won't)\s+(?:support|accept|offer|process)\s+(?:visa\s+|h[- ]?1b\s+)?transfers?\b|\bno\s+(?:visa\s+|h[- ]?1b\s+)?transfers?\b", value, re.I)
     if transfer and transfer_refused:
-        return "not_available"
+        phrase = transfer_refused.group()
+        return decision("not_available", f'The wording “{phrase}” explicitly refuses visa-transfer support.', phrase)
     if transfer and re.search(r"\b(?:support|accept|offer|available|only)\b", value, re.I):
         if negative and not re.search(r"\b(?:new|except)\b", value, re.I):
-            return "not_available"
-        return "conditional"
+            phrase = negative.group()
+            return decision("not_available", f'The wording “{phrase}” explicitly refuses sponsorship.', phrase)
+        phrase = transfer.group()
+        return decision("conditional", f'The reference to “{phrase}” limits this statement to visa-transfer support rather than a general sponsorship offer.', phrase)
     if negative:
-        if re.search(r"\bunless\b", value, re.I):
-            return "conditional"
-        return "not_available"
+        exception = re.search(r"\bunless\b.*", value, re.I)
+        if exception:
+            phrase = exception.group()
+            return decision("conditional", f'The refusal includes the exception “{phrase}”, so sponsorship depends on that condition.', negative.group(), phrase)
+        phrase = negative.group()
+        return decision("not_available", f'The wording “{phrase}” explicitly says sponsorship is unavailable.', phrase)
     if positive:
-        return "conditional" if CONDITIONAL.search(value) else "mentioned"
-    if INTEREST.search(value) and re.search(r"\bsponsor\w*\b", value, re.I) and re.search(r"\b(?:may|might|case.by.case|subject to|consider|considered)\b", value, re.I):
-        return "conditional"
+        conditions = list(dict.fromkeys(match.group() for match in CONDITIONAL.finditer(value)))
+        if conditions:
+            phrases = ", ".join(f'“{phrase}”' for phrase in conditions)
+            return decision("conditional", f'The sponsorship offer is qualified by {phrases}, so it is conditional.', positive.group(), *conditions)
+        phrase = positive.group()
+        return decision("mentioned", f'The wording “{phrase}” explicitly offers visa sponsorship.', phrase)
+    uncertainty = re.search(r"\b(?:may|might|case.by.case|subject to|consider|considered)\b", value, re.I)
+    if INTEREST.search(value) and re.search(r"\bsponsor\w*\b", value, re.I) and uncertainty:
+        phrase = uncertainty.group()
+        return decision("conditional", f'The sponsorship statement uses “{phrase}”, so it describes a possibility or a condition.', phrase)
     return None
+
+
+def sentence_status(sentence):
+    """Return only the category from the sentence's explained decision."""
+    result = sentence_decision(sentence)
+    return result["status"] if result else None
 
 
 def classify(description):
@@ -91,9 +110,9 @@ def classify(description):
     for sentence in sentences(description):
         if not INTEREST.search(sentence):
             continue
-        status = sentence_status(sentence)
-        if status and len(sentence) <= 5000:
-            evidence.append({"quote": sentence, "status": status, "method": "rules"})
+        result = sentence_decision(sentence)
+        if result and len(sentence) <= 5000:
+            evidence.append({"quote": sentence, **result, "method": "rules"})
         elif not NOT_NEEDED.search(normalize(sentence)) and not HISTORICAL.search(sentence):
             ambiguous = True
     categories = {entry["status"] for entry in evidence}
@@ -111,7 +130,7 @@ def classify(description):
         status = "not_specified"
     review = conflict or (ambiguous and not categories)
     return {"status": status, "evidence": evidence, "needs_review": review, "method": "rules",
-            "notes": "Conflicting statements require review." if conflict else "Sponsorship wording requires review." if review else "Based only on explicit listing statements." if evidence else "No explicit sponsorship offer or refusal found."}
+            "notes": "The description contains both an offer and a refusal. These statements conflict, so no clear category can be assigned." if conflict else evidence[0]["reason"] if len(evidence) == 1 else "At least one sponsorship statement includes conditions or visa-transfer limits." if status == "conditional" else "The quoted statements explicitly refuse sponsorship." if status == "not_available" else "The quoted statements explicitly offer sponsorship." if status == "mentioned" else "The description mentions immigration or sponsorship, but does not clearly offer or refuse sponsorship for this vacancy." if review else "No sentence in the available description explicitly offers or refuses visa sponsorship. Remote work and relocation assistance alone do not establish sponsorship."}
 
 
 def validate_ai(description, proposal):
@@ -137,16 +156,18 @@ def validate_ai(description, proposal):
         original = originals[normalize(quote)]
         if not INTEREST.search(original):
             raise ValueError("Evidence does not discuss sponsorship or immigration.")
-        validated.append({"quote": original, "status": proposal["status"], "method": "ai"})
+        validated.append({"quote": original, "status": proposal["status"], "method": "ai",
+                          "reason": "This sentence mentions immigration or sponsorship, but does not establish an offer or refusal for this vacancy.",
+                          "triggers": list(dict.fromkeys(match.group() for match in INTEREST.finditer(original)))})
     if proposal["status"] != "not_specified" and not validated:
         raise ValueError("A sponsorship claim needs supporting evidence.")
     grounded = classify("\n".join(entry["quote"] for entry in validated))
     # Finding the words in the listing is not enough to prove an offer exists.
     if proposal["status"] != "not_specified" and grounded["status"] != proposal["status"]:
         return {**baseline, "evidence": [{**entry, "status": "not_specified"} for entry in validated],
-                "method": "rules+ai", "needs_review": True, "notes": "AI interpretation could not be independently validated; review the quoted wording."}
+                "method": "rules+ai", "needs_review": True, "notes": baseline["notes"] + " AI interpretation could not be independently validated; review the quoted wording."}
     return {**grounded, "evidence": validated, "method": "rules+ai",
-            "needs_review": grounded["needs_review"] or baseline["needs_review"], "notes": "AI evidence checked against the original description."}
+            "needs_review": grounded["needs_review"] or baseline["needs_review"], "notes": grounded["notes"]}
 
 
 def description_hash(description):

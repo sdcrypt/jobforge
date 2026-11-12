@@ -7,7 +7,7 @@ const BADGES: Record<SponsorshipStatus, { label: string; color: string; explanat
     explanation: 'The listing explicitly mentions a sponsorship offer.',
   },
   conditional: {
-    label: 'Conditional / limited',
+    label: 'Conditional sponsorship',
     color: 'border-amber-200 bg-amber-50 text-amber-800',
     explanation: 'Sponsorship has conditions or is limited, for example to visa transfers.',
   },

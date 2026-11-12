@@ -8,6 +8,44 @@ from models.job import Job
 
 
 class SponsorshipRulesTests(unittest.TestCase):
+    def test_conditional_reason_records_the_actual_limiting_words(self):
+        description = "Visa sponsorship may be available for eligible candidates."
+        result = classify(description)
+        evidence = result["evidence"][0]
+        self.assertEqual(evidence["quote"], description)
+        self.assertEqual(evidence["status"], "conditional")
+        self.assertIn("may", evidence["triggers"])
+        self.assertIn("eligible", evidence["triggers"])
+        self.assertIn("may", result["notes"])
+        self.assertIn("eligible", result["notes"])
+
+    def test_refusal_reason_preserves_the_negation(self):
+        result = classify("We cannot provide visa sponsorship.")
+        evidence = result["evidence"][0]
+        self.assertIn("cannot provide visa sponsorship", evidence["triggers"])
+        self.assertIn("cannot provide visa sponsorship", evidence["reason"])
+
+    def test_offer_reason_records_offer_wording(self):
+        result = classify("We offer visa sponsorship.")
+        self.assertIn("offer visa sponsorship", result["evidence"][0]["triggers"])
+        self.assertIn("offer visa sponsorship", result["notes"])
+
+    def test_transfer_reason_explains_the_limitation(self):
+        result = classify("We support H1B transfers only.")
+        self.assertIn("H1B transfers", result["evidence"][0]["triggers"])
+        self.assertIn("visa-transfer support", result["notes"])
+
+    def test_conflict_reason_keeps_both_original_decisions(self):
+        result = classify("We offer visa sponsorship. We cannot provide visa sponsorship.")
+        self.assertEqual(result["status"], "not_specified")
+        self.assertIn("both an offer and a refusal", result["notes"])
+        self.assertTrue(all(entry["reason"] and entry["triggers"] for entry in result["evidence"]))
+
+    def test_unknown_does_not_invent_a_supporting_quote(self):
+        result = classify("Remote work and relocation assistance provided.")
+        self.assertEqual(result["evidence"], [])
+        self.assertIn("No sentence", result["notes"])
+
     def test_explicit_offers(self):
         for description in ("We offer visa sponsorship.", "Visa sponsorship is available for this position.", "We can sponsor work visas.", "We sponsor visas.", "We have no issue providing visa sponsorship."):
             with self.subTest(description=description):

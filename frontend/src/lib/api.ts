@@ -33,6 +33,8 @@ export interface Job {
   sponsorship_status: SponsorshipStatus | null
   sponsorship_checked_at: string | null
   sponsorship_needs_review: boolean
+  sponsorship_evidence: { quote: string; status: SponsorshipStatus; method: string; reason?: string; triggers?: string[] }[] | null
+  sponsorship_notes: string | null
   location: string | null
   url: string
   portal: string

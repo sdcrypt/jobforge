@@ -1,5 +1,5 @@
 from agents.base import BaseAgent
-from core.sponsorship import save_assessment, update_sponsorship, validate_ai
+from core.sponsorship import classify, save_assessment, update_sponsorship, validate_ai
 
 
 class SponsorshipAgent(BaseAgent):
@@ -28,5 +28,5 @@ class SponsorshipAgent(BaseAgent):
         except Exception:
             # A failed sponsorship review should not stop the separate fit analysis.
             job.sponsorship_needs_review = True
-            job.sponsorship_notes = "AI review was unavailable or its evidence failed validation; review required."
+            job.sponsorship_notes = classify(job.description)["notes"] + " AI review was unavailable or its evidence failed validation; review required."
             await self.emit("thinking", "Sponsorship remains unverified; no supported offer was inferred.")
