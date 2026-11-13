@@ -3,7 +3,7 @@ from sqlalchemy import func, select
 from pydantic import BaseModel, Field
 
 from core.database import get_db
-from core.runs import ACTIVE_STATUSES, enqueue_run, serialize_run
+from core.runs import ACTIVE_STATUSES, cancel_run, enqueue_run, serialize_run
 from models.application import AgentEvent, Application
 from models.job import Job
 from models.run import TaskRun
@@ -50,6 +50,12 @@ async def get_run(run_id: int, db=Depends(get_db)):
         raise HTTPException(404, "Run not found")
     children = (await db.execute(select(TaskRun).where(TaskRun.parent_id == run.id).order_by(TaskRun.created_at))).scalars().all()
     return {**serialize_run(run, detail=True), "children": [serialize_run(child) for child in children]}
+
+
+@router.post("/{run_id}/stop")
+async def stop_run(run_id: int, db=Depends(get_db)):
+    """Permanently stop queued, running, or retrying work without deleting results."""
+    return serialize_run(await cancel_run(db, run_id))
 
 
 @router.post("/{run_id}/retry", status_code=202)

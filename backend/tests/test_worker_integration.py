@@ -93,6 +93,16 @@ database.engine = create_async_engine(os.environ['DATABASE_URL'], connect_args={
 database.AsyncSessionLocal = async_sessionmaker(database.engine, expire_on_commit=False)
 from workers.celery_app import celery_app
 from workers import tasks
+from workers import handlers
+import asyncio
+original_perform = handlers.perform_run
+async def perform(record):
+    if record.kind == 'cancellation_test':
+        await runs.stage('waiting', 'Waiting for the stop test')
+        await asyncio.Event().wait()
+    return await original_perform(record)
+from core import runs
+handlers.perform_run = perform
 import sys
 from pathlib import Path
 backend_dir = str(Path(tasks.__file__).resolve().parents[1])
@@ -128,6 +138,28 @@ celery_app.worker_main(['worker', f'--pool={pool}', '--concurrency=1', '--loglev
                     self.assertEqual(record.error_type, "ValueError")
                     self.assertIn("Unknown task kind", record.error)
                     self.assertIsNotNone(record.finished_at)
+                    # A stopped task must free the single worker slot for the next run.
+                    async with sessions() as db:
+                        stopped, _ = await runs.enqueue_run(db, "cancellation_test", max_attempts=1)
+                    for attempt in range(300):
+                        async with sessions() as db:
+                            record = await db.get(TaskRun, stopped.id)
+                        if record.stage == "waiting":
+                            break
+                        await asyncio.sleep(0.1)
+                    self.assertEqual(record.stage, "waiting", worker_log.read_text())
+                    async with sessions() as db:
+                        await runs.cancel_run(db, stopped.id)
+                        next_run, _ = await runs.enqueue_run(db, "rank", max_attempts=1)
+                    for attempt in range(300):
+                        async with sessions() as db:
+                            record = await db.get(TaskRun, next_run.id)
+                        if record.status in runs.TERMINAL_STATUSES:
+                            break
+                        await asyncio.sleep(0.1)
+                    self.assertEqual(record.status, "succeeded", worker_log.read_text())
+                    async with sessions() as db:
+                        self.assertEqual((await db.get(TaskRun, stopped.id)).status, "cancelled")
             finally:
                 celery_app.conf.broker_url = original_broker
                 celery_app.conf.result_backend = original_backend

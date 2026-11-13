@@ -5,6 +5,7 @@ export const APPLICATION_STATUSES: ApplicationStatus[] = [
 ]
 
 export function statusLabel(status: string) {
+  if (status === 'cancelled') return 'Stopped'
   return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ')
 }
 

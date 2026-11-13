@@ -114,6 +114,7 @@ Your Mac and Docker must stay awake for processing to continue.
 - Temporary failures retry automatically within the attempt limit.
 - The scheduler checks schedules and interrupted work every minute.
 - **Retry run** starts a linked retry while keeping the original history.
+- **Stop run** cancels the run and its research tasks, keeps saved results, and prevents retries. Scheduled future runs still follow your search configuration; set auto-run to 0 for manual runs only.
 
 Keep the backend, worker, Beat scheduler, PostgreSQL, and Redis running.
 Changed worker code needs a worker restart.

@@ -227,7 +227,7 @@ export interface TaskRun {
   children?: TaskRun[]
   id: number
   kind: string
-  status: 'queued' | 'running' | 'retrying' | 'succeeded' | 'partial' | 'failed'
+  status: 'queued' | 'running' | 'retrying' | 'succeeded' | 'partial' | 'failed' | 'cancelled'
   job_id: number | null
   config_id: number | null
   parent_id: number | null
@@ -260,6 +260,7 @@ async function waitForRun(runId: number | string): Promise<TaskRun> {
     const run = await req<TaskRun>(`/api/runs/${runId}`)
     if (run.status === 'succeeded' || run.status === 'partial') return run
     if (run.status === 'failed') throw new Error(run.error || 'Task failed. Open Runs for details and retry.')
+    if (run.status === 'cancelled') throw new Error('Run stopped at your request.')
     await new Promise(resolve => setTimeout(resolve, 3000))
   }
   throw new Error('Work is still queued or running. Open Runs to follow progress; it will continue after you leave this page.')
@@ -323,6 +324,7 @@ export const api = {
       return req<{ runs: TaskRun[]; count: number }>(`/api/runs?${query}`)
     },
     get: (runId: number | string) => req<TaskRun>(`/api/runs/${runId}`),
+    stop: (runId: number | string) => req<TaskRun>(`/api/runs/${runId}/stop`, { method: 'POST' }),
     events: (runId?: number) => req<{ events: AgentEventData[] }>(`/api/runs/events${runId ? `?run_id=${runId}&limit=200` : ''}`),
     retry: (runId: number | string, maxAttempts = 3) => req<QueuedRun>(`/api/runs/${runId}/retry`, { method: 'POST', body: JSON.stringify({ max_attempts: maxAttempts }) }),
     wait: waitForRun,

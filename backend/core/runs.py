@@ -14,8 +14,9 @@ from models.application import Application
 from models.run import TaskRun
 
 ACTIVE_STATUSES = ("queued", "running", "retrying")
-TERMINAL_STATUSES = ("succeeded", "partial", "failed")
+TERMINAL_STATUSES = ("succeeded", "partial", "failed", "cancelled")
 LEASE_SECONDS = 180
+HEARTBEAT_SECONDS = 2
 current_run: ContextVar[tuple[int, str] | None] = ContextVar("current_run", default=None)
 
 
@@ -50,6 +51,12 @@ async def enqueue_run(db, kind: str, payload: dict | None = None, job_id: int | 
                       dispatch: bool = True, max_attempts: int = 3) -> tuple[TaskRun, bool]:
     key = active_key(kind, job_id)
     payload = dict(payload or {})
+    if parent_id:
+        # Lock the parent so Stop cannot miss a child created at the same time.
+        parent = (await db.execute(select(TaskRun).where(TaskRun.id == parent_id)
+                                  .with_for_update().execution_options(populate_existing=True))).scalar_one()
+        if parent.status != "running":
+            raise RunLost("The parent run has stopped.")
     if kind == "resume_parse":
         key = f"resume_parse:{sha256((payload or {}).get('content', '').encode()).hexdigest()}"
     if job_id:
@@ -95,7 +102,10 @@ async def dispatch_run(run_id: int) -> None:
 async def commit_owned(db) -> None:
     context = current_run.get()
     if context:
-        run = (await db.execute(select(TaskRun).where(TaskRun.id == context[0]).with_for_update())).scalar_one()
+        # Check ownership before flushing pending application or job changes.
+        with db.no_autoflush:
+            run = (await db.execute(select(TaskRun).where(TaskRun.id == context[0]).with_for_update()
+                                   .execution_options(populate_existing=True))).scalar_one()
         if run.status != "running" or run.execution_token != context[1]:
             await db.rollback()
             raise RunLost("This worker no longer owns the run.")
@@ -129,15 +139,61 @@ async def stage(name: str, message: str, completed: int = 0, total: int = 0, don
     await ws_manager.emit_agent_event("pipeline", "done" if done else "thinking", message, {"stage": name, "completed": completed, "total": total})
 
 
-async def heartbeat(run_id: int, token: str) -> None:
+async def cancel_run(db, run_id: int) -> TaskRun:
+    """Stop this run and its children. Keep completed results and prevent retries."""
+    run = (await db.execute(select(TaskRun).where(TaskRun.id == run_id)
+                           .with_for_update().execution_options(populate_existing=True))).scalar_one_or_none()
+    if not run:
+        raise HTTPException(404, "Run not found")
+    if run.status == "cancelled":
+        return run
+    if run.status not in ACTIVE_STATUSES:
+        raise HTTPException(409, "This run has already finished.")
+    children = (await db.execute(select(TaskRun).where(TaskRun.parent_id == run.id)
+                                .with_for_update())).scalars().all()
+    now = datetime.utcnow()
+    for record in [run, *children]:
+        if record.status not in ACTIVE_STATUSES:
+            continue
+        record.status = "cancelled"
+        record.active_key = None
+        record.execution_token = None
+        record.lease_expires_at = None
+        record.next_retry_at = None
+        record.dispatched_at = None
+        record.dispatch_error = None
+        record.error = None
+        record.error_type = None
+        record.traceback = None
+        record.finished_at = now
+        record.stages = [{**entry, "status": "cancelled", "message": "Stopped at your request.",
+                          "finished_at": now.isoformat()} if entry["status"] == "running" else entry
+                         for entry in (record.stages or [])]
+        if record.kind == "resume_parse":
+            record.payload = {}
+        if record.kind == "docgen":
+            application = (await db.execute(select(Application).where(
+                Application.job_id == record.job_id).with_for_update())).scalar_one_or_none()
+            if application:
+                # Previously generated files remain available after stopping regeneration.
+                application.document_status = "ready" if application.one_pager_path and application.cover_letter_path else "not_started"
+                application.document_error = "Document generation stopped at your request."
+    await db.commit()
+    return run
+
+
+async def heartbeat(run_id: int, token: str, work: asyncio.Task | None = None) -> None:
+    """Keep the lease alive and interrupt in-flight async work when Stop is pressed."""
     while True:
-        await asyncio.sleep(15)
+        await asyncio.sleep(HEARTBEAT_SECONDS)
         async with database.AsyncSessionLocal() as db:
             result = await db.execute(update(TaskRun).where(
                 TaskRun.id == run_id, TaskRun.execution_token == token, TaskRun.status == "running"
             ).values(lease_expires_at=datetime.utcnow() + timedelta(seconds=LEASE_SECONDS)))
             await db.commit()
             if not result.rowcount:
+                if work:
+                    work.cancel()
                 return
 
 
@@ -199,20 +255,32 @@ async def execute_run(run_id: int) -> str:
             return "not_claimed"
         run = await db.get(TaskRun, run_id)
     context_token = current_run.set((run_id, token))
-    pulse = asyncio.create_task(heartbeat(run_id, token))
+    work = None
+    pulse = None
     try:
         from workers.handlers import perform_run
         await stage("starting", f"Starting {run.kind}, attempt {run.attempts}/{run.max_attempts}")
         await stage("starting", "Worker ready", done=True)
-        result = await perform_run(run)
+        work = asyncio.create_task(perform_run(run))
+        pulse = asyncio.create_task(heartbeat(run_id, token, work))
+        result = await work
         await _finish(run_id, token, result=result)
+    except asyncio.CancelledError:
+        async with database.AsyncSessionLocal() as db:
+            record = await db.get(TaskRun, run_id)
+            if record.status == "running" and record.execution_token == token:
+                raise
+            if record.status != "cancelled":
+                return "ownership_lost"
     except RunLost:
         return "ownership_lost"
     except Exception as exc:
         await _finish(run_id, token, error=exc)
     finally:
-        pulse.cancel()
-        await asyncio.gather(pulse, return_exceptions=True)
+        tasks = [task for task in (pulse, work) if task is not None]
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
         current_run.reset(context_token)
     async with database.AsyncSessionLocal() as db:
         return (await db.get(TaskRun, run_id)).status

@@ -5,15 +5,17 @@ import Link from 'next/link'
 import useSWR from 'swr'
 import { api, TaskRun } from '@/lib/api'
 import { formatDate, statusLabel } from '@/lib/applications'
+import StopRunButton from '@/components/agents/StopRunButton'
 
 const RUN_KINDS = ['pipeline', 'search', 'rank', 'research', 'docgen', 'resume_parse', 'apply']
-const RUN_STATUSES = ['queued', 'running', 'retrying', 'succeeded', 'partial', 'failed']
+const RUN_STATUSES = ['queued', 'running', 'retrying', 'succeeded', 'partial', 'failed', 'cancelled']
 
 function RunBadge({ status }: { status: string }) {
   const color = status === 'failed' ? 'bg-red-50 text-red-700'
+    : status === 'cancelled' ? 'bg-slate-100 text-slate-600'
     : status === 'succeeded' ? 'bg-green-50 text-green-700'
       : status === 'partial' || status === 'retrying' ? 'bg-amber-50 text-amber-800' : 'bg-brand-50 text-brand-700'
-  return <span className={`rounded px-2 py-1 text-xs font-medium ${color}`}>{status === 'partial' ? 'Completed with errors' : statusLabel(status)}</span>
+  return <span className={`rounded px-2 py-1 text-xs font-medium ${color}`}>{status === 'cancelled' ? 'Stopped' : status === 'partial' ? 'Completed with errors' : statusLabel(status)}</span>
 }
 
 export default function RunsPage() {
@@ -67,6 +69,8 @@ export default function RunsPage() {
     {selected && <section className="rounded-xl border bg-white p-5 space-y-4" aria-label="Run details">
       <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">{statusLabel(selected.kind)} run</h2><p className="break-all text-xs text-slate-500">{selected.id}</p></div><RunBadge status={selected.status} /></div>
       <p className="text-xs text-slate-500">Started {formatDate(selected.started_at)} · Finished {formatDate(selected.finished_at)} · Attempt {selected.attempts}/{selected.max_attempts}</p>
+      <StopRunButton run={selected} />
+      {selected.status === 'cancelled' && <p role="status" className="text-sm text-slate-600">Stopped at your request. Saved results are kept. This run will not retry automatically.</p>}
       {(selected.job_id || selected.config_id) && <p className="text-sm font-medium">{selected.label}</p>}
       {Boolean(selected.result?.portal_reports) && <section className="space-y-3"><h3 className="text-sm font-semibold">Portal search reports</h3>{Object.entries(selected.result!.portal_reports as Record<string, { status: string; found: number; searches: { keyword: string; location: string; status: string; errors: string[]; excluded_old: number; unknown_date: number }[] }>).map(([portal, report]) => <div key={portal} className="rounded-lg border p-3 text-sm">
         <p className="font-medium">{portal} · {report.status} · {report.found} results before deduplication</p>

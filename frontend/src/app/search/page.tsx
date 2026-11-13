@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { api, SearchConfig } from '@/lib/api'
 import { usePipelineRun } from '@/hooks/usePipelineRun'
 import PipelineStatus from '@/components/agents/PipelineStatus'
+import StopRunButton from '@/components/agents/StopRunButton'
 
 const PORTALS: { id: string; label: string; note: string }[] = [
   { id: 'jobleads',       label: 'JobLeads',             note: 'Public listings' },
@@ -379,6 +380,7 @@ export default function SearchPage() {
             )}
           </button>
         </div>
+        {activeRun && <StopRunButton run={activeRun} />}
         {activeRun && <p role="status" className="text-sm text-slate-600">
           {activeRun.status === 'queued' ? 'Waiting for a worker to start this run.' : `Current stage: ${activeRun.stage}.`}
           {' '}<Link href={`/runs?run=${activeRun.id}`} className="text-brand-700 underline">View run progress</Link>

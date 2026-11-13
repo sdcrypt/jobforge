@@ -88,6 +88,159 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             return await db.get(TaskRun, run_id)
 
+    async def test_stop_queued_run_is_durable_idempotent_and_releases_duplicate_lock(self):
+        run = await self.enqueue()
+        response = await self.client.post(f"/api/runs/{run.id}/stop")
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["status"], "cancelled")
+        self.assertIsNotNone(response.json()["finished_at"])
+        self.assertEqual((await self.client.post(f"/api/runs/{run.id}/stop")).status_code, 200)
+        with patch("workers.handlers.perform_run", new=AsyncMock()) as handler:
+            self.assertEqual(await runs.execute_run(run.id), "not_claimed")
+            await runs.recover_and_dispatch()
+            handler.assert_not_awaited()
+        self.sender.assert_not_called()
+        fresh = await self.enqueue()
+        self.assertNotEqual(run.id, fresh.id)
+        self.assertEqual((await self.client.post("/api/runs/999999/stop")).status_code, 404)
+
+    async def test_stop_interrupts_active_work_and_preserves_saved_results(self):
+        run = await self.enqueue()
+        started = asyncio.Event()
+        interrupted = asyncio.Event()
+
+        async def perform(record):
+            await runs.stage("rank", "First result saved", 1, 5, result={"jobs_ranked": 1})
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                interrupted.set()
+
+        with patch("workers.handlers.perform_run", new=perform), patch.object(runs, "HEARTBEAT_SECONDS", 0.05):
+            execution = asyncio.create_task(runs.execute_run(run.id))
+            try:
+                await asyncio.wait_for(started.wait(), timeout=5)
+                response = await self.client.post(f"/api/runs/{run.id}/stop")
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(await asyncio.wait_for(execution, timeout=5), "cancelled")
+                self.assertTrue(interrupted.is_set())
+            finally:
+                execution.cancel()
+                await asyncio.gather(execution, return_exceptions=True)
+        stopped = await self.get(run.id)
+        self.assertEqual(stopped.result["jobs_ranked"], 1)
+        self.assertEqual(stopped.stages[-1]["status"], "cancelled")
+        self.assertIsNone(stopped.execution_token)
+        self.assertIsNone(stopped.active_key)
+        self.assertIsNone(stopped.next_retry_at)
+
+    async def test_stop_pipeline_cancels_children_and_blocks_late_child_creation(self):
+        run = await self.enqueue("pipeline")
+        async with self.sessions() as db:
+            record = await db.get(TaskRun, run.id)
+            record.status = "running"
+            record.result = {"new_jobs_found": 10}
+            await db.commit()
+            child, _ = await runs.enqueue_run(db, "research", job_id=self.job_id, parent_id=run.id, dispatch=False)
+            db.add(TaskRun(kind="research", status="succeeded", parent_id=run.id))
+            await db.commit()
+        self.assertEqual((await self.client.post(f"/api/runs/{run.id}/stop")).status_code, 200)
+        self.assertEqual((await self.get(child.id)).status, "cancelled")
+        async with self.sessions() as db:
+            children = (await db.execute(select(TaskRun).where(TaskRun.parent_id == run.id))).scalars().all()
+            self.assertEqual({entry.status for entry in children}, {"cancelled", "succeeded"})
+            with self.assertRaises(runs.RunLost):
+                await runs.enqueue_run(db, "research", job_id=self.job_id, parent_id=run.id, dispatch=False)
+        self.assertEqual((await self.get(run.id)).result["new_jobs_found"], 10)
+
+    async def test_stop_fences_cached_worker_commits_and_late_failure(self):
+        run = await self.enqueue()
+        async with self.sessions() as db:
+            await db.execute(update(TaskRun).where(TaskRun.id == run.id).values(status="running", execution_token="old"))
+            await db.commit()
+        async with self.sessions() as stale_db:
+            cached = await stale_db.get(TaskRun, run.id)
+            self.assertEqual(cached.status, "running")
+            await self.client.post(f"/api/runs/{run.id}/stop")
+            token = runs.current_run.set((run.id, "old"))
+            try:
+                job = await stale_db.get(Job, self.job_id)
+                job.title = "Must not be saved"
+                with self.assertRaises(runs.RunLost):
+                    await runs.commit_owned(stale_db)
+            finally:
+                runs.current_run.reset(token)
+        await runs._finish(run.id, "old", error=RuntimeError("Late failure"))
+        await runs.recover_and_dispatch()
+        self.assertEqual((await self.get(run.id)).status, "cancelled")
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(Job, self.job_id)).title, "Engineer")
+        self.sender.assert_not_called()
+
+    async def test_stop_documents_keeps_application_status_and_existing_documents(self):
+        for existing in (False, True):
+            async with self.sessions() as db:
+                application = (await db.execute(select(Application).where(Application.job_id == self.job_id))).scalar_one_or_none()
+                if not application:
+                    application = Application(job_id=self.job_id, status="applied")
+                    db.add(application)
+                application.document_status = "generating"
+                application.one_pager_path = "existing-resume.pdf" if existing else None
+                application.cover_letter_path = "existing-letter.pdf" if existing else None
+                await db.commit()
+            run = await self.enqueue("docgen", job_id=self.job_id)
+            self.assertEqual((await self.client.post(f"/api/runs/{run.id}/stop")).status_code, 200)
+            async with self.sessions() as db:
+                application = (await db.execute(select(Application))).scalar_one()
+                self.assertEqual(application.status, "applied")
+                self.assertEqual(application.document_status, "ready" if existing else "not_started")
+
+    async def test_stop_finished_run_is_rejected(self):
+        run = await self.enqueue()
+        with patch("workers.handlers.perform_run", new=AsyncMock(return_value={})):
+            await runs.execute_run(run.id)
+        response = await self.client.post(f"/api/runs/{run.id}/stop")
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual((await self.get(run.id)).status, "succeeded")
+
+    async def test_stop_waiting_retry_clears_schedule_without_redispatch(self):
+        run = await self.enqueue()
+        async with self.sessions() as db:
+            await db.execute(update(TaskRun).where(TaskRun.id == run.id).values(
+                status="retrying", attempts=1, next_retry_at=datetime.utcnow() - timedelta(seconds=1),
+                created_at=datetime.utcnow() - timedelta(minutes=5), error="Temporary failure"))
+            await db.commit()
+        response = await self.client.post(f"/api/runs/{run.id}/stop")
+        self.assertEqual(response.status_code, 200)
+        await runs.recover_and_dispatch()
+        self.sender.assert_not_called()
+        stopped = await self.get(run.id)
+        self.assertIsNone(stopped.next_retry_at)
+        self.assertIsNone(stopped.error)
+
+    async def test_worker_interruption_after_ownership_change_is_not_a_task_failure(self):
+        run = await self.enqueue()
+        started = asyncio.Event()
+
+        async def perform(record):
+            started.set()
+            await asyncio.Event().wait()
+
+        with patch("workers.handlers.perform_run", new=perform), patch.object(runs, "HEARTBEAT_SECONDS", 0.05):
+            execution = asyncio.create_task(runs.execute_run(run.id))
+            try:
+                await asyncio.wait_for(started.wait(), timeout=5)
+                async with self.sessions() as db:
+                    await db.execute(update(TaskRun).where(TaskRun.id == run.id).values(
+                        status="retrying", execution_token=None))
+                    await db.commit()
+                self.assertEqual(await asyncio.wait_for(execution, timeout=5), "ownership_lost")
+                self.assertEqual((await self.get(run.id)).status, "retrying")
+            finally:
+                execution.cancel()
+                await asyncio.gather(execution, return_exceptions=True)
+
     async def test_duplicate_work_shares_run_and_duplicate_delivery_executes_once(self):
         run = await self.enqueue()
         async with self.sessions() as db:
