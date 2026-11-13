@@ -3,14 +3,14 @@
 import { useEffect, useState } from 'react'
 import { useJobs } from '@/hooks/useJobs'
 import JobCard from '@/components/jobs/JobCard'
-import { api } from '@/lib/api'
+import { api, SponsorshipFilter } from '@/lib/api'
 import { usePipelineRun } from '@/hooks/usePipelineRun'
 import PipelineStatus from '@/components/agents/PipelineStatus'
 import ManualJobForm from '@/components/jobs/ManualJobForm'
 
 const STATUS_TABS = ['all', 'new', 'ranked', 'saved', 'preparing', 'applied', 'screening', 'interviewing', 'offer', 'accepted', 'rejected', 'withdrawn'] as const
 type StatusTab = typeof STATUS_TABS[number]
-const EMPTY_FILTERS = { keyword: '', company: '', portal: '', location: '', remote: '', salary_min: '', salary_max: '', salary_currency: 'USD', salary_period: 'year', posted_within_days: '', sort: 'fit', has_salary: false }
+const EMPTY_FILTERS = { keyword: '', company: '', portal: '', location: '', remote: '', sponsorship_status: '' as SponsorshipFilter | '', salary_min: '', salary_max: '', salary_currency: 'USD', salary_period: 'year', posted_within_days: '', sort: 'fit', has_salary: false }
 
 export default function JobsPage() {
   const [activeTab, setActiveTab] = useState<StatusTab>('all')
@@ -22,6 +22,7 @@ export default function JobsPage() {
   const statusParams = activeTab === 'all' ? {} : ['new', 'ranked'].includes(activeTab) ? { status: activeTab } : { application_status: activeTab }
   const { jobs, total, hasMore, isLoading, error, refresh } = useJobs({
     ...statusParams, keyword: filters.keyword, company: filters.company, portal: filters.portal,
+    sponsorship_status: filters.sponsorship_status || undefined,
     location: filters.location, remote: filters.remote ? filters.remote === 'true' : undefined,
     salary_min: filters.salary_min === '' ? undefined : Number(filters.salary_min),
     salary_max: filters.salary_max === '' ? undefined : Number(filters.salary_max),
@@ -169,6 +170,7 @@ export default function JobsPage() {
           {(['keyword', 'company', 'location'] as const).map(field => <label key={field} className="text-xs font-medium capitalize text-slate-600">{field === 'keyword' ? 'Keyword / company / description' : field}<input className="input mt-1" value={filters[field]} onChange={event => changeFilter(field, event.target.value)} /></label>)}
           <label className="text-xs font-medium text-slate-600">Portal<select className="input mt-1" value={filters.portal} onChange={event => changeFilter('portal', event.target.value)}><option value="">All portals</option>{['linkedin', 'remoteok', 'weworkremotely', 'hackernews', 'jobleads', 'manual'].map(portal => <option key={portal} value={portal}>{portal === 'manual' ? 'Manually added' : portal}</option>)}</select></label>
           <label className="text-xs font-medium text-slate-600">Work setting<select className="input mt-1" value={filters.remote} onChange={event => changeFilter('remote', event.target.value)}><option value="">Any</option><option value="true">Remote</option><option value="false">Not marked remote</option></select></label>
+          <label className="text-xs font-medium text-slate-600">Visa sponsorship<select className="input mt-1" value={filters.sponsorship_status} onChange={event => changeFilter('sponsorship_status', event.target.value)}><option value="">All jobs</option><option value="mentioned">Sponsorship mentioned</option><option value="conditional">Conditional sponsorship</option><option value="not_available">No sponsorship</option><option value="not_specified">Sponsorship unclear</option><option value="not_assessed">Not assessed</option></select></label>
           <label className="text-xs font-medium text-slate-600">Posted within<select className="input mt-1" value={filters.posted_within_days} onChange={event => changeFilter('posted_within_days', event.target.value)}><option value="">Any date</option>{[1, 3, 7, 14, 30, 90].map(days => <option key={days} value={days}>{days} days</option>)}</select></label>
           <label className="text-xs font-medium text-slate-600">Salary from<input className="input mt-1" type="number" min="0" value={filters.salary_min} onChange={event => changeFilter('salary_min', event.target.value)} /></label>
           <label className="text-xs font-medium text-slate-600">Salary to<input className="input mt-1" type="number" min="0" value={filters.salary_max} onChange={event => changeFilter('salary_max', event.target.value)} /></label>
@@ -194,9 +196,7 @@ export default function JobsPage() {
           <div className="text-4xl mb-3">💼</div>
           <p className="font-medium">{error ? 'Could not load jobs. Please try again.' : 'No jobs found'}</p>
           <p className="text-sm mt-1">
-            {jobs.length === 0
-              ? 'Run the pipeline to search for jobs'
-              : 'Try adjusting the filters'}
+            Try adjusting the filters or running the pipeline.
           </p>
         </div>
       ) : (

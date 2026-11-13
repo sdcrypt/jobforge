@@ -36,7 +36,7 @@ Use the same command after updating the project to rebuild and restart services.
 Supported sources: **LinkedIn, RemoteOK, We Work Remotely, HackerNews Hiring,
 and JobLeads**. Results depend on what each portal makes publicly available.
 
-- Search by keyword or company. Filter by portal, location, remote work, fit score, date, or salary.
+- Search by keyword or company. Filter by portal, location, remote work, fit score, date, salary, or visa sponsorship.
 - Sort results and browse pages of 20, 50, or 100 jobs.
 - Use **Saved** to see jobs currently saved in the application tracker.
 - Use **Add job manually** to paste a description or save a listing URL from another source.
@@ -84,8 +84,9 @@ statements are shown together. Rules handle clear wording; Research uses AI to
 review unclear wording and checks its quotes against the description.
 
 Remote work, relocation assistance, and past company sponsorship do not prove
-that the current job offers sponsorship. Sponsorship filters and search
-preferences are not available yet.
+that the current job offers sponsorship. Use the **Visa sponsorship** filter on
+Jobs to choose a category or **Not assessed**. **All jobs** removes this filter.
+Sponsorship preferences in Search Config are not available yet.
 
 ## Applications
 

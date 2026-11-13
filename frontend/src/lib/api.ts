@@ -21,6 +21,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type SponsorshipStatus = 'mentioned' | 'conditional' | 'not_available' | 'not_specified'
+export type SponsorshipFilter = SponsorshipStatus | 'not_assessed'
 
 export interface Job {
   id: number
@@ -62,6 +63,7 @@ export interface Job {
 }
 
 export interface JobsQuery {
+  sponsorship_status?: SponsorshipFilter
   status?: string
   application_status?: string
   keyword?: string

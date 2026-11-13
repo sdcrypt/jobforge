@@ -152,10 +152,16 @@ async def list_jobs(
     posted_within_days: int | None = Query(default=None, ge=1, le=365),
     sort: Literal["fit", "newest", "posted", "salary", "company"] = "fit",
     application_status: str | None = None,
+    sponsorship_status: Literal["mentioned", "conditional", "not_available", "not_specified", "not_assessed"] | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     """List jobs with optional filters, sorted by fit_score descending."""
     q = select(Job)
+    if sponsorship_status == "not_assessed":
+        q = q.where(Job.sponsorship_checked_at == None)
+    elif sponsorship_status:
+        # A default category without a check date is still an unassessed job.
+        q = q.where(Job.sponsorship_checked_at != None, Job.sponsorship_status == sponsorship_status)
     if status != "dismissed":
         q = q.where(Job.status != "dismissed")
     if keyword and keyword.strip():

@@ -83,6 +83,53 @@ class DiscoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["total"], 1)
         self.assertEqual(result["jobs"][0]["id"], job.id)
 
+    async def test_sponsorship_filters_distinguish_checked_from_default_categories(self):
+        examples = {"mentioned": "We offer visa sponsorship.", "conditional": "Visa sponsorship may be available.",
+                    "not_available": "We cannot provide visa sponsorship.", "not_specified": "Remote work is available."}
+        expected_ids = {}
+        for status, description in examples.items():
+            imported = await self.client.post("/api/jobs/import", json={"title": f"Visa {status}", "company": "Example", "description": description})
+            self.assertEqual(imported.status_code, 201)
+            expected_ids[status] = imported.json()["id"]
+        async with self.sessions() as db:
+            unchecked = (await db.execute(select(Job).where(Job.url == "https://example.com/0"))).scalar_one()
+            unchecked.sponsorship_status = "mentioned"
+            await db.commit()
+        for status, job_id in expected_ids.items():
+            response = await self.client.get("/api/jobs", params={"sponsorship_status": status})
+            self.assertEqual(response.status_code, 200)
+            result = response.json()
+            self.assertEqual(result["total"], 1)
+            self.assertEqual(result["jobs"][0]["id"], job_id)
+        unassessed = (await self.client.get("/api/jobs?sponsorship_status=not_assessed&limit=100")).json()
+        self.assertEqual(unassessed["total"], 125)
+        self.assertTrue(all(job["sponsorship_checked_at"] is None for job in unassessed["jobs"]))
+        self.assertEqual((await self.client.get("/api/jobs")).json()["total"], 129)
+        self.assertEqual((await self.client.get("/api/jobs?sponsorship_status=invalid")).status_code, 422)
+
+    async def test_sponsorship_filter_combines_with_search_saved_view_and_pagination(self):
+        imported_ids = []
+        for index in range(3):
+            response = await self.client.post("/api/jobs/import", json={"title": f"Python visa test {index}", "company": "Visa Company", "location": "Berlin", "remote": True, "description": "Visa sponsorship may be available."})
+            imported_ids.append(response.json()["id"])
+        params = {"sponsorship_status": "conditional", "keyword": "Python visa", "company": "Visa Company", "location": "Berlin", "portal": "manual", "remote": True, "limit": 1}
+        first = (await self.client.get("/api/jobs", params=params)).json()
+        second = (await self.client.get("/api/jobs", params={**params, "offset": 1})).json()
+        self.assertEqual(first["total"], 3)
+        self.assertEqual(first["count"], 1)
+        self.assertTrue(first["has_more"])
+        self.assertEqual(second["total"], 3)
+        self.assertNotEqual(first["jobs"][0]["id"], second["jobs"][0]["id"])
+        async with self.sessions() as db:
+            db.add(Application(job_id=imported_ids[0], status="saved"))
+            await db.commit()
+        saved = (await self.client.get("/api/jobs", params={**params, "application_status": "saved"})).json()
+        self.assertEqual(saved["total"], 1)
+        self.assertEqual(saved["jobs"][0]["id"], imported_ids[0])
+        empty = (await self.client.get("/api/jobs", params={**params, "company": "Missing company"})).json()
+        self.assertEqual(empty["total"], 0)
+        self.assertFalse(empty["has_more"])
+
     async def test_salary_overlap_currency_and_period(self):
         params = {"salary_min": 140000, "salary_max": 160000, "salary_currency": "USD", "salary_period": "year", "sort": "salary"}
         self.assertEqual((await self.client.get("/api/jobs", params=params)).json()["total"], 125)
