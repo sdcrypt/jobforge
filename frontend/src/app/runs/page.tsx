@@ -7,7 +7,7 @@ import { api, TaskRun } from '@/lib/api'
 import { formatDate, statusLabel } from '@/lib/applications'
 import StopRunButton from '@/components/agents/StopRunButton'
 
-const RUN_KINDS = ['pipeline', 'search', 'rank', 'research', 'docgen', 'resume_parse', 'apply']
+const RUN_KINDS = ['pipeline', 'search', 'rank', 'research', 'sponsorship', 'docgen', 'resume_parse', 'apply']
 const RUN_STATUSES = ['queued', 'running', 'retrying', 'succeeded', 'partial', 'failed', 'cancelled']
 
 function RunBadge({ status }: { status: string }) {

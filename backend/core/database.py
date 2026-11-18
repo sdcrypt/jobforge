@@ -104,6 +104,7 @@ async def init_db():
         application_table = Application.__table__
         job_table = Job.__table__
         from core.sponsorship import assessment_values, classify, description_hash
+        from core.description_text import plain_text
         # Give existing jobs a rules-only assessment without making AI requests at startup.
         unclassified = (await conn.execute(select(job_table.c.id, job_table.c.description, job_table.c.updated_at,
                                                 job_table.c.sponsorship_description_hash))).mappings().all()
@@ -113,6 +114,7 @@ async def init_db():
                 continue
             # Preserve the job's update date while filling these assessment fields.
             await conn.execute(job_table.update().where(job_table.c.id == job["id"]).values(
+                description=plain_text(job["description"]) or None,
                 **assessment_values(job["description"], classify(job["description"])), updated_at=job["updated_at"]
             ))
         rows = (await conn.execute(select(application_table))).mappings().all()

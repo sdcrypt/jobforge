@@ -33,6 +33,7 @@ export interface Job {
   description_error: string | null
   sponsorship_status: SponsorshipStatus | null
   sponsorship_checked_at: string | null
+  sponsorship_method: string | null
   sponsorship_needs_review: boolean
   sponsorship_evidence: { quote: string; status: SponsorshipStatus; method: string; reason?: string; triggers?: string[] }[] | null
   sponsorship_notes: string | null
@@ -339,6 +340,11 @@ export const api = {
     },
     import: (data: ManualJobInput) => req<Job>('/api/jobs/import', { method: 'POST', body: JSON.stringify(data) }),
     get: (id: number) => req<Job>(`/api/jobs/${id}`),
+    assessSponsorship: async (id: number) => {
+      const queued = await req<QueuedRun>(`/api/jobs/${id}/sponsorship`, { method: 'POST' })
+      await waitForRun(queued.run_id)
+      return req<Job>(`/api/jobs/${id}`)
+    },
     dismiss: (id: number) =>
       req<{ message: string }>(`/api/jobs/${id}/dismiss`, { method: 'PATCH' }),
     /** Run Research Agent — AI fit analysis against profile. Returns updated scores. */

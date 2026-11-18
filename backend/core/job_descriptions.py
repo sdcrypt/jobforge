@@ -6,14 +6,7 @@ from datetime import datetime, timedelta
 import httpx
 from core.sponsorship import update_sponsorship
 from bs4 import BeautifulSoup
-
-
-def plain_text(html: str) -> str:
-    """Remove page controls and scripts, keeping readable text without cutting it short."""
-    soup = BeautifulSoup(html, "html.parser")
-    for tag in soup.select("script, style, nav, footer, header, aside, noscript, form"):
-        tag.decompose()
-    return "\n".join(line.strip() for line in soup.get_text("\n", strip=True).splitlines() if line.strip())
+from core.description_text import plain_text
 
 
 def extract_description(html: str) -> str:
@@ -73,7 +66,10 @@ def replace_description(job, description: str, source: str) -> bool:
     missed requirements. Existing application records and documents are untouched.
     The caller commits the job changes to the database.
     """
-    if not description or len(description.strip()) <= len((job.description or "").strip()):
+    description = plain_text(description)
+    existing = plain_text(job.description)
+    job.description = existing or None
+    if not description or len(description.strip()) <= len(existing.strip()):
         return False
     job.description = description
     job.description_source = source

@@ -54,6 +54,9 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         descriptions = patch("core.job_descriptions.fetch_description", new=AsyncMock(return_value="Job requirements. " * 30))
         descriptions.start()
         self.addCleanup(descriptions.stop)
+        sponsorship = patch("agents.sponsorship.SponsorshipAgent.chat_json", new=AsyncMock(return_value={"status": "not_specified", "quotes": []}))
+        sponsorship.start()
+        self.addCleanup(sponsorship.stop)
         await database.init_db()
         app = FastAPI()
         for router in (routes.router, pipeline_router, search_router, jobs.router, applications.router, profile.router):
@@ -378,6 +381,50 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.payload["keywords"], ["Engineer"])
         self.assertEqual(run.config_id, self.config_id)
         self.sender.assert_called_once()
+
+    async def test_sponsorship_recheck_is_queued_and_preserves_fit_and_application(self):
+        refusal = "Visa Sponsorship through PayPal is not available for this position now or any time in the future."
+        async with self.sessions() as db:
+            job = await db.get(Job, self.job_id)
+            job.portal = "linkedin"
+            job.description = f"<p>Python and Django.</p><br>{refusal}<br>Base pay varies."
+            job.fit_score = 85
+            job.researched_at = datetime.utcnow()
+            db.add(Application(job_id=self.job_id, status="applied", document_status="ready"))
+            await db.commit()
+        response = await self.client.post(f"/api/jobs/{self.job_id}/sponsorship")
+        duplicate = await self.client.post(f"/api/jobs/{self.job_id}/sponsorship")
+        self.assertEqual(response.status_code, 202, response.text)
+        self.assertEqual(response.json()["run_id"], duplicate.json()["run_id"])
+        with patch("agents.sponsorship.SponsorshipAgent.chat_json", new=AsyncMock(return_value={"status": "not_available", "quotes": [refusal]})), patch("core.job_descriptions.fetch_description", new=AsyncMock()) as fetch:
+            self.assertEqual(await runs.execute_run(response.json()["run_id"]), "succeeded")
+            fetch.assert_not_awaited()
+        job = (await self.client.get(f"/api/jobs/{self.job_id}")).json()
+        self.assertEqual(job["sponsorship_method"], "ai")
+        self.assertEqual(job["sponsorship_status"], "not_available")
+        self.assertEqual(job["sponsorship_evidence"][0]["quote"], refusal)
+        self.assertNotIn("<br>", job["description"])
+        self.assertEqual(job["fit_score"], 85)
+        async with self.sessions() as db:
+            application = (await db.execute(select(Application))).scalar_one()
+            self.assertEqual(application.status, "applied")
+            self.assertEqual(application.document_status, "ready")
+
+    async def test_failed_sponsorship_recheck_is_visible_and_keeps_preliminary_refusal(self):
+        async with self.sessions() as db:
+            job = await db.get(Job, self.job_id)
+            job.portal = "manual"
+            job.description = "Visa Sponsorship through PayPal is not available for this position now or any time in the future."
+            await db.commit()
+        queued = (await self.client.post(f"/api/jobs/{self.job_id}/sponsorship")).json()
+        with patch("agents.sponsorship.SponsorshipAgent.chat_json", new=AsyncMock(side_effect=RuntimeError("Model unavailable"))):
+            self.assertEqual(await runs.execute_run(queued["run_id"]), "failed")
+        run = await self.get(queued["run_id"])
+        self.assertEqual(run.max_attempts, 1)
+        self.assertIn("AI sponsorship review", run.error)
+        job = (await self.client.get(f"/api/jobs/{self.job_id}")).json()
+        self.assertEqual(job["sponsorship_status"], "not_available")
+        self.assertTrue(job["sponsorship_needs_review"])
 
     async def test_pipeline_commits_jobs_before_ranking_failure(self):
         response = await self.client.post("/api/pipeline/run")

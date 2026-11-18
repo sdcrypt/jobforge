@@ -29,6 +29,13 @@ class DescriptionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(extract_description(html), LONG_DESCRIPTION)
         self.assertEqual(plain_text("<p>First</p><p>Second</p><script>tracking()</script>"), "First\nSecond")
 
+    def test_cleaning_preserves_inline_sentences_and_decodes_escaped_html(self):
+        text = "Visa Sponsorship through PayPal is not available for this position now or any time in the future."
+        markup = "<p>Visa <strong>Sponsorship</strong> through PayPal is <em>not available</em> for this position now or any time in the future.</p>"
+        import html
+        for value in (markup, html.escape(markup), html.escape(html.escape(markup))):
+            self.assertEqual(plain_text(value), text)
+
     def test_access_verification_does_not_become_a_job_description(self):
         with self.assertRaises(ValueError):
             extract_description("<title>Just a moment...</title><body>Verify browser</body>")

@@ -83,6 +83,23 @@ async def perform_run(run) -> dict:
             result = await research_one(db, run.job_id)
             await stage("research", "Job research completed", 1, 1, done=True)
             return result
+        if run.kind == "sponsorship":
+            from agents.sponsorship import SponsorshipAgent
+            job = await db.get(Job, run.job_id)
+            if not job:
+                raise ValueError("Job no longer exists.")
+            if not (job.description or "").strip():
+                raise ValueError("Add a job description or run Research before checking sponsorship.")
+            agent = SponsorshipAgent(db=db, job_id=job.id)
+            await stage("sponsorship", "Analysing visa sponsorship")
+            # Recheck the saved text without replacing it or clearing existing fit scores.
+            reviewed = await agent.run(job, force=True)
+            await commit_owned(db)
+            if not reviewed:
+                raise RuntimeError("AI sponsorship review was unavailable or returned invalid evidence. The preliminary result was kept; check the model and try again.")
+            await stage("sponsorship", "Sponsorship assessment saved", 1, 1, done=True)
+            return {"sponsorship_status": job.sponsorship_status, "method": job.sponsorship_method,
+                    "needs_review": job.sponsorship_needs_review}
         if run.kind == "docgen":
             from api.routes.applications import _run_docgen
             application = (await db.execute(select(Application).where(Application.job_id == run.job_id))).scalar_one_or_none()

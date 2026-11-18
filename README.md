@@ -80,8 +80,9 @@ Job cards show what the available description says:
 | Not assessed | The description has not been checked yet. |
 
 Open job details to read the original sentence behind the badge. Conflicting
-statements are shown together. Rules handle clear wording; Research uses AI to
-review unclear wording and checks its quotes against the description.
+statements are shown together. AI interprets sponsorship during ranking and
+research; code checks its source quotes. Rules provide a preliminary fallback.
+Use **Recheck sponsorship with AI** in job details to reassess an existing job.
 
 Remote work, relocation assistance, and past company sponsorship do not prove
 that the current job offers sponsorship. Use the **Visa sponsorship** filter on

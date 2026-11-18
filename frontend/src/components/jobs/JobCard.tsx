@@ -257,6 +257,7 @@ export default function JobCard({ job, onRefresh }: Props) {
         description_error: result.description_error,
         sponsorship_status: result.sponsorship_status,
         sponsorship_checked_at: result.sponsorship_checked_at,
+        sponsorship_method: result.sponsorship_method,
         sponsorship_needs_review: result.sponsorship_needs_review,
         sponsorship_evidence: result.sponsorship_evidence,
         sponsorship_notes: result.sponsorship_notes,
@@ -349,7 +350,7 @@ export default function JobCard({ job, onRefresh }: Props) {
             {application && <Link href="/applications" className="rounded bg-brand-50 px-2 py-1 text-brand-700 hover:underline">{statusLabel(application.status)} · Manage application</Link>}
           </div>
 
-      <SponsorshipDetails job={localJob} />
+      <SponsorshipDetails job={localJob} onAssessed={updated => { setLocalJob(updated); onRefresh?.() }} />
 
       {/* Quick strengths/gaps row — shown when NOT in full panel */}
       {!showPanel && (localJob.strengths?.length || localJob.gaps?.length) ? (

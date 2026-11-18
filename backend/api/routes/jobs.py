@@ -331,6 +331,13 @@ async def get_job(job_id: int, db: AsyncSession = Depends(get_db)):
     return job
 
 
+@router.post("/{job_id}/sponsorship", status_code=202)
+async def assess_sponsorship(job_id: int, db: AsyncSession = Depends(get_db)):
+    """Queue an AI sponsorship recheck without rerunning fit analysis or documents."""
+    run, created = await enqueue_run(db, "sponsorship", job_id=job_id, max_attempts=1)
+    return run_response(run, created)
+
+
 @router.patch("/{job_id}/dismiss")
 async def dismiss_job(job_id: int, db: AsyncSession = Depends(get_db)):
     """Mark a job as dismissed — hides it from the default list."""

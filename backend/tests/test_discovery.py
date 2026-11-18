@@ -30,6 +30,9 @@ class DiscoveryTests(unittest.IsolatedAsyncioTestCase):
         sender = patch("workers.celery_app.celery_app.send_task")
         sender.start()
         self.addCleanup(sender.stop)
+        sponsorship = patch("agents.sponsorship.SponsorshipAgent.chat_json", new=AsyncMock(return_value={"status": "not_specified", "quotes": []}))
+        sponsorship.start()
+        self.addCleanup(sponsorship.stop)
         publisher = patch("core.websocket.Redis.from_url")
         factory = publisher.start()
         self.addCleanup(publisher.stop)
@@ -220,10 +223,10 @@ class DiscoveryTests(unittest.IsolatedAsyncioTestCase):
             agent.emit = AsyncMock()
             with patch("agents.sponsorship.SponsorshipAgent.chat_json", new=AsyncMock(return_value={"status": "not_specified", "quotes": [description]})), patch.object(agent, "_analyse", new=AsyncMock(return_value={"fit_score": 80})):
                 result = await agent.run(job_id, {})
-                self.assertEqual(result["sponsorship"]["method"], "rules+ai")
+                self.assertEqual(result["sponsorship"]["method"], "ai")
         stored = (await self.client.get(f"/api/jobs/{job_id}")).json()
         self.assertEqual(stored["sponsorship_status"], "not_specified")
-        self.assertTrue(stored["sponsorship_needs_review"])
+        self.assertFalse(stored["sponsorship_needs_review"])
         self.assertEqual(stored["sponsorship_evidence"][0]["quote"], description)
 
     async def test_named_configurations_update_in_place_and_explicit_run(self):

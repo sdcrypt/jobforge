@@ -1,17 +1,18 @@
 """Read a job description and find statements about visa sponsorship.
 
-Rules handle clear offers and refusals. AI suggestions must pass the same
-evidence checks before we save them. Unclear wording stays marked for review.
+AI interprets the wording; code checks its categories and source quotes.
+Rules provide a preliminary fallback when AI has not reviewed the description.
 Nothing here decides whether a candidate is legally eligible for a visa.
 """
 
 import hashlib
 import re
 from datetime import datetime
+from core.description_text import plain_text
 
 STATUSES = {"mentioned", "conditional", "not_available", "not_specified"}
-# Increase this version when changing rules so saved assessments are checked again.
-CLASSIFIER_VERSION = "2"
+# Increase this when the analysis changes so old assessments are checked again.
+CLASSIFIER_VERSION = "3"
 # These patterns look for relevant words, refusals, offers, and restrictions.
 INTEREST = re.compile(r"\b(?:visa|sponsor\w*|immigration|work permits?|h[- ]?1b)\b", re.I)
 NEGATIVE = re.compile(
@@ -28,6 +29,9 @@ HISTORICAL = re.compile(r"\b(?:previously|historically|in the past|past sponsors
 NOT_NEEDED = re.compile(r"\b(?:visa )?sponsorship\s+(?:is\s+)?(?:not required|not needed|unnecessary)\b|\b(?:do not|don't)\s+(?:require|need)\s+(?:visa )?sponsorship\b|\bno\s+(?:visa )?sponsorship\s+(?:is\s+)?(?:required|needed|restrictions|limitations)\b", re.I)
 
 
+ROLE_REFUSAL = re.compile(r"\bsponsorship\b[^.!?\n]{0,100}\b(?:is not|isn't|will not be|won't be)\s+(?:available|offered|provided|supported)\b", re.I)
+
+
 def normalize(value):
     """Make spacing and punctuation consistent when comparing two quotes."""
     return " ".join(value.replace("’", "'").replace("–", "-").split())
@@ -35,7 +39,7 @@ def normalize(value):
 
 def sentences(description):
     """Split the description into sentences or lines, keeping their original words."""
-    return [part.strip() for part in re.split(r"(?<=[.!?;])\s+|\n+", description or "") if part.strip()]
+    return [part.strip() for part in re.split(r"(?<=[.!?;])\s+|\n+", plain_text(description)) if part.strip()]
 
 
 def decision(status, reason, *phrases):
@@ -51,6 +55,7 @@ def sentence_decision(sentence):
     if re.search(r"\b(?:for other (?:roles|positions)|by (?:other|some) (?:employers|companies))\b", value, re.I):
         return None
     negative = NEGATIVE.search(value) or re.search(r"\bnot for (?:this|the|our) (?:role|position|vacancy|job)\b|\bsponsorship\s+(?:is\s+)?never\s+(?:available|offered|provided|supported)\b", value, re.I)
+    negative = negative or ROLE_REFUSAL.search(value)
     if HISTORICAL.search(value) and not negative:
         return None
     positive = POSITIVE.search(value)
@@ -134,15 +139,12 @@ def classify(description):
 
 
 def validate_ai(description, proposal):
-    """Check an AI answer against the source text before allowing it to be saved.
+    """Check the AI's format and verbatim quotes, leaving interpretation to the AI.
 
-    Reject invented or shortened quotes. Keep clear rule-based evidence even
-    if AI disagrees. A real quote still needs to support the proposed category.
+    Do not require the wording to match a keyword rule. This allows the agent
+    to understand employer names, exceptions, and wording we have not hardcoded.
     """
-    baseline = classify(description)
-    if baseline["evidence"]:
-        return baseline
-    if not isinstance(proposal, dict) or proposal.get("status") not in STATUSES:
+    if not isinstance(proposal, dict) or not isinstance(proposal.get("status"), str) or proposal["status"] not in STATUSES:
         raise ValueError("Invalid sponsorship classification.")
     quotes = proposal.get("quotes")
     if not isinstance(quotes, list) or len(quotes) > 8:
@@ -154,25 +156,21 @@ def validate_ai(description, proposal):
         if not isinstance(quote, str) or len(quote) > 5000 or normalize(quote) not in originals:
             raise ValueError("Sponsorship evidence must match a complete sentence in the description.")
         original = originals[normalize(quote)]
-        if not INTEREST.search(original):
-            raise ValueError("Evidence does not discuss sponsorship or immigration.")
         validated.append({"quote": original, "status": proposal["status"], "method": "ai",
-                          "reason": "This sentence mentions immigration or sponsorship, but does not establish an offer or refusal for this vacancy.",
-                          "triggers": list(dict.fromkeys(match.group() for match in INTEREST.finditer(original)))})
+                          "reason": original, "triggers": []})
     if proposal["status"] != "not_specified" and not validated:
         raise ValueError("A sponsorship claim needs supporting evidence.")
-    grounded = classify("\n".join(entry["quote"] for entry in validated))
-    # Finding the words in the listing is not enough to prove an offer exists.
-    if proposal["status"] != "not_specified" and grounded["status"] != proposal["status"]:
-        return {**baseline, "evidence": [{**entry, "status": "not_specified"} for entry in validated],
-                "method": "rules+ai", "needs_review": True, "notes": baseline["notes"] + " AI interpretation could not be independently validated; review the quoted wording."}
-    return {**grounded, "evidence": validated, "method": "rules+ai",
-            "needs_review": grounded["needs_review"] or baseline["needs_review"], "notes": grounded["notes"]}
+    needs_review = proposal.get("needs_review", False)
+    if not isinstance(needs_review, bool):
+        raise ValueError("needs_review must be true or false.")
+    return {"status": proposal["status"], "evidence": validated, "method": "ai",
+            "needs_review": needs_review,
+            "notes": " ".join(entry["quote"] for entry in validated) or "No clear sponsorship statement found."}
 
 
 def description_hash(description):
-    """Make a fingerprint of the text and rule version to detect outdated results."""
-    return hashlib.sha256((CLASSIFIER_VERSION + "\0" + (description or "")).encode()).hexdigest()
+    """Make a fingerprint of the text and analysis version to detect outdated results."""
+    return hashlib.sha256((CLASSIFIER_VERSION + "\0" + plain_text(description)).encode()).hexdigest()
 
 
 def assessment_values(description, result):
@@ -194,5 +192,6 @@ def update_sponsorship(job):
 
     Reuse an existing AI assessment when its source text and version still match.
     """
+    job.description = plain_text(job.description) or None
     if job.sponsorship_description_hash != description_hash(job.description):
         save_assessment(job, classify(job.description))

@@ -10,6 +10,7 @@ from agents.base import BaseAgent
 from models.job import Job
 from models.profile import UserProfile
 from core.job_descriptions import ensure_description
+from agents.sponsorship import SPONSORSHIP_INSTRUCTIONS, SponsorshipAgent
 import structlog
 
 log = structlog.get_logger()
@@ -26,7 +27,8 @@ Return ONLY valid JSON:
   "overall": <weighted average>,
   "strengths": ["<key strength 1>", "<key strength 2>"],
   "gaps": ["<gap 1>", "<gap 2>"],
-  "verdict": "strong_fit|good_fit|weak_fit|no_fit"
+  "verdict": "strong_fit|good_fit|weak_fit|no_fit",
+  "sponsorship": {"status":"mentioned|conditional|not_available|not_specified","quotes":[],"needs_review":false}
 }
 
 Scoring rubric:
@@ -79,7 +81,7 @@ class RankAgent(BaseAgent):
         """Load the available description and ask AI to score it against the profile.
 
         Pass the entire returned description, including requirements near its end.
-        Sponsorship is assessed separately and is not added to the fit score here.
+        The same response includes sponsorship, kept separate from the fit score.
         """
         description = await ensure_description(job, self.emit)
         job_summary = (
@@ -91,13 +93,19 @@ class RankAgent(BaseAgent):
             f"Description: {description or 'Description unavailable; assess only the supplied metadata and state the limitations.'}"
         )
         messages = [
-            self.system(SCORE_PROMPT),
+            self.system(SCORE_PROMPT + "\n\n" + SPONSORSHIP_INSTRUCTIONS + "\nInclude the sponsorship object in the main scoring JSON. Sponsorship must not change the fit scores."),
             self.user(
                 f"CANDIDATE PROFILE:\n{profile_summary}\n\n"
                 f"JOB LISTING:\n{job_summary}"
             ),
         ]
-        return await self.chat_json(messages, temperature=0.1)
+        result = await self.chat_json(messages, temperature=0.1)
+        try:
+            # Reuse this AI request rather than making a second call for every job.
+            SponsorshipAgent.accept(job, result.get("sponsorship"))
+        except ValueError:
+            SponsorshipAgent.fallback(job)
+        return result
 
     @staticmethod
     def _build_profile_summary(profile: UserProfile) -> str:

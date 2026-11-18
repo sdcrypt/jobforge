@@ -99,10 +99,14 @@ class SponsorshipRulesTests(unittest.TestCase):
         replace_description(job, "We cannot provide visa sponsorship now or in the future.", "listing")
         self.assertEqual(job.sponsorship_status, "not_available")
 
-    def test_ai_cannot_override_explicit_refusal_or_conflict(self):
-        for text in ("We cannot provide visa sponsorship.", "Visa sponsorship is available. We cannot provide visa sponsorship."):
-            result = validate_ai(text, {"status": "mentioned", "quotes": ["Visa sponsorship is available."]})
-            self.assertNotEqual(result["status"], "mentioned")
+    def test_paypal_refusal_is_not_a_positive_offer_even_in_html(self):
+        refusal = "Visa Sponsorship through PayPal is not available for this position now or any time in the future."
+        for description in (refusal, f"<ul><li>Python and Django.</li></ul><br>{refusal}<br>The base pay varies.",
+                            f"&lt;p&gt;{refusal}&lt;/p&gt;"):
+            with self.subTest(description=description):
+                result = classify(description)
+                self.assertEqual(result["status"], "not_available")
+                self.assertEqual(result["evidence"][0]["quote"], refusal)
 
     def test_hallucinated_or_cherry_picked_quotes_rejected(self):
         text = "Immigration matters can be discussed with the recruiter."
@@ -110,22 +114,31 @@ class SponsorshipRulesTests(unittest.TestCase):
             with self.subTest(proposal=proposal), self.assertRaises(ValueError):
                 validate_ai(text, proposal)
 
-    def test_matching_quote_does_not_make_unsubstantiated_offer_valid(self):
-        text = "We work with an immigration advisor."
+    def test_ai_interpretation_is_not_vetoed_by_keyword_rules(self):
+        text = "We will arrange and fund the work permit needed to take up this role."
+        self.assertEqual(classify(text)["status"], "not_specified")
         result = validate_ai(text, {"status": "mentioned", "quotes": [text]})
-        self.assertEqual(result["status"], "not_specified")
-        self.assertTrue(result["needs_review"])
+        self.assertEqual(result["status"], "mentioned")
+        self.assertEqual(result["method"], "ai")
         self.assertEqual(result["evidence"][0]["quote"], text)
+
+    def test_quote_cannot_omit_negation_from_the_middle_of_a_sentence(self):
+        text = "Visa sponsorship through PayPal is not available for this role."
+        with self.assertRaises(ValueError):
+            validate_ai(text, {"status": "mentioned", "quotes": ["Visa sponsorship through PayPal is available for this role."]})
 
 
 class SponsorshipAgentTests(unittest.IsolatedAsyncioTestCase):
-    async def test_clear_refusal_does_not_need_ai(self):
+    async def test_clear_refusal_is_also_reviewed_by_ai(self):
         agent = SponsorshipAgent()
-        agent.chat_json = AsyncMock()
-        job = Job(description="We cannot provide visa sponsorship.")
+        agent.emit = AsyncMock()
+        text = "We cannot provide visa sponsorship."
+        agent.chat_json = AsyncMock(return_value={"status": "not_available", "quotes": [text]})
+        job = Job(description=text)
         await agent.run(job)
         self.assertEqual(job.sponsorship_status, "not_available")
-        agent.chat_json.assert_not_awaited()
+        self.assertEqual(job.sponsorship_method, "ai")
+        agent.chat_json.assert_awaited_once()
 
     async def test_invalid_ai_quote_fails_closed_without_losing_description(self):
         agent = SponsorshipAgent()
@@ -148,3 +161,54 @@ class SponsorshipAgentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(job.sponsorship_status, "not_specified")
         self.assertEqual(job.sponsorship_evidence[0]["quote"], text)
         agent.chat_json.assert_awaited_once()
+
+    async def test_forced_recheck_and_changed_description_refresh_ai_result(self):
+        positive = "We offer visa sponsorship."
+        refusal = "Visa Sponsorship through PayPal is not available for this position now or any time in the future."
+        agent = SponsorshipAgent()
+        agent.emit = AsyncMock()
+        agent.chat_json = AsyncMock(side_effect=[{"status": "mentioned", "quotes": [positive]},
+                                                {"status": "mentioned", "quotes": [positive]},
+                                                {"status": "not_available", "quotes": [refusal]}])
+        job = Job(description=positive)
+        await agent.run(job)
+        await agent.run(job)
+        self.assertEqual(agent.chat_json.await_count, 1)
+        await agent.run(job, force=True)
+        job.description = f"<strong>{refusal}</strong>"
+        await agent.run(job)
+        self.assertEqual(agent.chat_json.await_count, 3)
+        self.assertEqual(job.sponsorship_status, "not_available")
+        self.assertEqual(job.description, refusal)
+
+    async def test_ai_refusal_and_conditions_are_saved_with_the_original_sentences(self):
+        cases = [("Visa Sponsorship through PayPal is not available for this position now or any time in the future.", "not_available"),
+                 ("We offer visa sponsorship for eligible candidates only.", "conditional"),
+                 ("We cannot sponsor new visas, but we support H1B transfers.", "conditional"),
+                 ("Remote work worldwide.", "not_specified")]
+        for text, status in cases:
+            with self.subTest(text=text):
+                agent = SponsorshipAgent()
+                agent.emit = AsyncMock()
+                quotes = [] if status == "not_specified" else [text]
+                agent.chat_json = AsyncMock(return_value={"status": status, "quotes": quotes})
+                job = Job(description=text)
+                await agent.run(job)
+                self.assertEqual(job.sponsorship_status, status)
+                self.assertEqual(job.sponsorship_method, "ai")
+
+    async def test_ranking_saves_ai_sponsorship_from_the_same_request(self):
+        from agents.rank import RankAgent
+        text = "Visa Sponsorship through PayPal is not available for this position now or any time in the future."
+        job = Job(title="Engineer", company="Venmo", portal="manual", description=f"<p>{text}</p>")
+        agent = RankAgent()
+        agent.emit = AsyncMock()
+        agent.chat_json = AsyncMock(return_value={"overall": 80, "sponsorship": {"status": "not_available", "quotes": [text]}})
+        result = await agent._score_job(job, "Python developer")
+        self.assertEqual(result["overall"], 80)
+        self.assertEqual(job.sponsorship_status, "not_available")
+        self.assertEqual(job.sponsorship_method, "ai")
+        agent.chat_json.assert_awaited_once()
+        prompt = agent.chat_json.call_args.args[0][1]["content"]
+        self.assertIn(text, prompt)
+        self.assertNotIn("<p>", prompt)
