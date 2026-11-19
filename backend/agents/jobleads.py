@@ -99,7 +99,8 @@ class JobLeadsAgent(BaseAgent):
         for page in range(1, 5):
             raw = await fetcher._fetch(base, params={**params, "page": str(page)})
             if not raw:
-                await self.emit("error", "JobLeads search could not be fetched; try again later.")
+                if not fetcher._http().blocked:
+                    await self.emit("error", "JobLeads search could not be fetched; try again later.")
                 return jobs
             soup = BeautifulSoup(raw, "html.parser")
             cards = soup.select('[data-testid="search-job-card"]')

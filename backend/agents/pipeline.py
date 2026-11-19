@@ -20,6 +20,7 @@ from core.websocket import ws_manager
 from core.runs import commit_owned, stage
 from models.run import TaskRun
 from core.runs import ACTIVE_STATUSES
+from core.portal_http import raise_if_all_portals_failed
 
 log = structlog.get_logger()
 
@@ -88,8 +89,7 @@ async def run_pipeline(db: AsyncSession, config_data: dict | None = None, config
     portal_reports = getattr(search_agent, "portal_reports", {})
     await stage("search", f"Found {len(raw_jobs)} results", len(raw_jobs), len(raw_jobs), done=True,
                 result={"portal_reports": portal_reports})
-    if portal_reports and all(report["status"] == "failed" for report in portal_reports.values()):
-        raise RuntimeError("All configured portals failed. See portal reports for details.")
+    raise_if_all_portals_failed(portal_reports)
     await stage("store", "Saving new jobs and skipping duplicates")
     new_count = await store_jobs(db, raw_jobs)
     await commit_owned(db)

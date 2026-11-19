@@ -438,6 +438,21 @@ class RunTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             self.assertIsNotNone((await db.execute(select(Job).where(Job.url == "https://example.com/new"))).scalar_one_or_none())
 
+    async def test_all_blocked_portals_do_not_retry_the_whole_pipeline(self):
+        queued = await self.client.post("/api/pipeline/run")
+
+        async def blocked(agent, **kwargs):
+            agent.portal_reports = {"linkedin": {"status": "failed", "failure_type": "rate_limited",
+                                                 "retry_at": "2026-11-19T14:00:00Z", "found": 0, "searches": []}}
+            return []
+
+        with patch("agents.search.SearchAgent.run", new=blocked):
+            self.assertEqual(await runs.execute_run(queued.json()["run_id"]), "failed")
+        run = await self.get(queued.json()["run_id"])
+        self.assertEqual(run.attempts, 1)
+        self.assertIsNone(run.next_retry_at)
+        self.assertEqual(run.result["portal_reports"]["linkedin"]["failure_type"], "rate_limited")
+
     async def test_pipeline_tracks_child_research_and_finishes_after_it(self):
         async with self.sessions() as db:
             config = await db.get(SearchConfig, self.config_id)

@@ -36,6 +36,7 @@ async def init_db():
     from sqlalchemy import Integer, inspect, select, text
     from models.application import Application
     from models.job import Job
+    from models.portal_request import PortalRequestState
     from core.application_lifecycle import TRANSITIONS, history_entry
 
     async with engine.begin() as conn:

@@ -23,6 +23,7 @@ from dateutil import parser as dateutil_parser
 from core.config import settings
 from agents.base import BaseAgent
 from core.job_descriptions import plain_text
+from core.portal_http import PortalHTTP, PortalUnavailable, portal_for, portal_session
 import structlog
 
 log = structlog.get_logger()
@@ -56,6 +57,16 @@ class SearchAgent(BaseAgent):
     name = "search"
     model = settings.llm_model_fast
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        from core.runs import current_run
+        self.http = PortalHTTP(emit=lambda *args: self.emit(*args),
+                               persistent=self.db is not None or current_run.get() is not None)
+
+    def _http(self):
+        """Nested JobLeads searches share the parent run's cache and request policy."""
+        return portal_session.get() or self.http
+
     async def emit(self, status: str, message: str, data: dict | None = None):
         report = _search_report.get()
         if report is not None and status == "error":
@@ -80,6 +91,10 @@ class SearchAgent(BaseAgent):
             await self.emit("error", "No supported portals selected. Choose from: " + ", ".join(SUPPORTED_PORTALS))
             return []
 
+        self.http.cache.clear()
+        self.http.blocked.clear()
+        self.http.announced.clear()
+
         await self.emit(
             "started",
             f"Searching {len(active_portals)} portal(s) — "
@@ -94,9 +109,7 @@ class SearchAgent(BaseAgent):
             for location in locations
         ]
 
-        await self.emit("thinking", f"Running {len(combos)} searches in parallel…")
-
-        sem = asyncio.Semaphore(4)
+        await self.emit("thinking", f"Running {len(combos)} searches; requests to each portal are paced and repeated feeds are reused…")
 
         async def bounded(portal, keyword, location):
             report = {"keyword": keyword, "location": location, "errors": [], "found": 0,
@@ -104,8 +117,12 @@ class SearchAgent(BaseAgent):
             token = _search_report.set(report)
             jobs = []
             try:
-                async with sem:
-                    await asyncio.sleep(random.uniform(0.4, 1.2))
+                if portal in blocked_portals:
+                    error = blocked_portals[portal]
+                    report.update(skipped=True, failure_type=error.failure_type,
+                                  retry_at=error.until.isoformat() + "Z")
+                    report["errors"].append(str(error))
+                else:
                     batch = await self._search_one(
                         portal, keyword, location, remote_only,
                         max_results=max_results, linkedin_pages=linkedin_pages,
@@ -125,6 +142,12 @@ class SearchAgent(BaseAgent):
                         if not posted:
                             report["unknown_date"] += 1
                         jobs.append(job)
+                    for host, error in self.http.blocked.items():
+                        if portal_for("https://" + host)[1] == portal:
+                            blocked_portals[portal] = error
+                            report.update(failure_type=error.failure_type, retry_at=error.until.isoformat() + "Z")
+                            if str(error) not in report["errors"]:
+                                report["errors"].append(str(error))
             except Exception as error:
                 await self.emit("error", f"{portal}: {keyword} / {location} failed: {error}", {"portal": portal})
             finally:
@@ -133,10 +156,20 @@ class SearchAgent(BaseAgent):
             report["status"] = "partial" if report["errors"] and jobs else "failed" if report["errors"] else "succeeded"
             return portal, jobs, report
 
-        results = await asyncio.gather(
-            *[bounded(p, k, l) for p, k, l in combos],
-            return_exceptions=True,
-        )
+        blocked_portals = {}
+
+        async def search_portal(portal):
+            # Different portals can run together. One portal never gets a burst
+            # from several keyword/location combinations at once.
+            return [await bounded(portal, keyword, location)
+                    for keyword in keywords for location in locations]
+
+        session_token = portal_session.set(self.http)
+        try:
+            groups = await asyncio.gather(*[search_portal(portal) for portal in dict.fromkeys(active_portals)])
+            results = [result for group in groups for result in group]
+        finally:
+            portal_session.reset(session_token)
 
         seen_urls: set[str] = set()
         all_jobs: list[dict] = []
@@ -150,6 +183,8 @@ class SearchAgent(BaseAgent):
             entry = self.portal_reports.setdefault(portal, {"status": "succeeded", "found": 0, "searches": []})
             entry["searches"].append(report)
             entry["found"] += len(jobs)
+            if report.get("failure_type"):
+                entry.update(failure_type=report["failure_type"], retry_at=report["retry_at"])
             for job in jobs:
                 url = job.get("url", "")
                 if url and url not in seen_urls:
@@ -158,9 +193,10 @@ class SearchAgent(BaseAgent):
 
         for portal, report in self.portal_reports.items():
             statuses = [search["status"] for search in report["searches"]]
+            report["skipped_searches"] = sum(bool(search.get("skipped")) for search in report["searches"])
             report["status"] = "failed" if all(status == "failed" for status in statuses) else "partial" if any(status != "succeeded" for status in statuses) else "succeeded"
             await self.emit("error" if report["status"] != "succeeded" else "thinking",
-                            f"{portal}: {report['status']} · {report['found']} results across {len(statuses)} searches",
+                            f"{portal}: {report['status']} · {report['found']} results · {report['skipped_searches']} searches skipped" + (f" · retry after {report['retry_at']}" if report.get("retry_at") else ""),
                             {"portal": portal, "report": report})
 
         await self.emit(
@@ -259,9 +295,7 @@ class SearchAgent(BaseAgent):
                         job["remote"] = True
                     jobs.append(job)
 
-            # Polite delay between pages
-            if page_num < pages - 1:
-                await asyncio.sleep(random.uniform(1.0, 2.0))
+            # The shared HTTP policy spaces every request, including pages.
 
         return jobs
 
@@ -298,20 +332,13 @@ class SearchAgent(BaseAgent):
 
     async def _search_remoteok(self, keyword: str, location: str, max_results: int = 15) -> list[dict]:
         try:
-            async with httpx.AsyncClient(
-                timeout=20,
-                follow_redirects=True,
-                headers={"User-Agent": _ua(), "Accept": "application/json"},
-            ) as client:
-                resp = await client.get("https://remoteok.com/api")
-                if resp.status_code != 200:
-                    log.warning("search.remoteok_http", status=resp.status_code)
-                    await self.emit("error", f"RemoteOK returned HTTP {resp.status_code}", {"portal": "remoteok"})
-                    return []
-                data = resp.json()
+            resp = await self._http().get("https://remoteok.com/api", headers={"User-Agent": _ua(), "Accept": "application/json"})
+            data = resp.json()
+        except PortalUnavailable:
+            return []
         except Exception as e:
             log.warning("search.remoteok_error", error=str(e))
-            await self.emit("error", f"RemoteOK failed: {e}", {"portal": "remoteok"})
+            await self.emit("error", f"RemoteOK failed: {str(e) or type(e).__name__}", {"portal": "remoteok"})
             return []
 
         # First element is a legal notice — skip non-job entries
@@ -434,41 +461,28 @@ class SearchAgent(BaseAgent):
 
     async def _search_hackernews(self, keyword: str, remote_only: bool, max_results: int = 15) -> list[dict]:
         try:
-            async with httpx.AsyncClient(timeout=15) as client:
-
-                # Step 1 — find latest "Who is Hiring" story
-                r1 = await client.get(
-                    "https://hn.algolia.com/api/v1/search_by_date",
-                    params={"tags": "ask_hn,who_is_hiring", "hitsPerPage": 1},
-                )
-                if r1.status_code != 200:
-                    await self.emit("error", f"Hacker News returned HTTP {r1.status_code}", {"portal": "hackernews"})
-                    return []
-                hits = r1.json().get("hits", [])
-                if not hits:
-                    return []
-
-                story_id = hits[0]["objectID"]
-                log.info("search.hackernews_thread", story_id=story_id)
-
-                # Step 2 — search comments in that story for our keyword
-                query = f"{keyword} remote" if remote_only else keyword
-                r2 = await client.get(
-                    "https://hn.algolia.com/api/v1/search_by_date",
-                    params={
-                        "tags":         f"comment,story_{story_id}",
-                        "query":        query,
-                        "hitsPerPage":  max(max_results, 20),  # fetch at least 20, respect config
-                    },
-                )
-                if r2.status_code != 200:
-                    await self.emit("error", f"Hacker News returned HTTP {r2.status_code}", {"portal": "hackernews"})
-                    return []
-
-                comment_hits = r2.json().get("hits", [])
+            # The latest thread and repeated comment queries are cached for this run.
+            r1 = await self._http().get(
+                "https://hn.algolia.com/api/v1/search_by_date",
+                params={"tags": "ask_hn,who_is_hiring", "hitsPerPage": 1},
+            )
+            hits = r1.json().get("hits", [])
+            if not hits:
+                return []
+            story_id = hits[0]["objectID"]
+            log.info("search.hackernews_thread", story_id=story_id)
+            query = f"{keyword} remote" if remote_only else keyword
+            r2 = await self._http().get(
+                "https://hn.algolia.com/api/v1/search_by_date",
+                params={"tags": f"comment,story_{story_id}", "query": query,
+                        "hitsPerPage": max(max_results, 20)},
+            )
+            comment_hits = r2.json().get("hits", [])
+        except PortalUnavailable:
+            return []
         except Exception as e:
             log.warning("search.hackernews_error", error=str(e))
-            await self.emit("error", f"Hacker News failed: {e}", {"portal": "hackernews"})
+            await self.emit("error", f"Hacker News failed: {str(e) or type(e).__name__}", {"portal": "hackernews"})
             return []
 
         jobs = []
@@ -512,27 +526,15 @@ class SearchAgent(BaseAgent):
 
     async def _fetch(self, url: str, params: dict | None = None) -> str | None:
         try:
-            async with httpx.AsyncClient(
-                timeout=15,
-                follow_redirects=True,
-                headers={
-                    "User-Agent":      _ua(),
-                    "Accept-Language": "en-US,en;q=0.9",
-                    "Accept":          "text/html,application/xhtml+xml,*/*;q=0.8",
-                },
-            ) as client:
-                resp = await client.get(url, params=params)
-                if resp.status_code == 200:
-                    title = BeautifulSoup(resp.text, "html.parser").title
-                    title_text = title.get_text(" ", strip=True).lower() if title else ""
-                    if not resp.text.strip() or any(marker in title_text for marker in ("just a moment", "access denied", "verify you are human", "security check")):
-                        await self.emit("error", "Portal returned an empty response or access-verification page.", {"url": url})
-                        return None
-                    return resp.text
-                log.warning("search.http_error", url=url, status=resp.status_code)
-                await self.emit("error", f"Job portal returned HTTP {resp.status_code}", {"url": url})
-                return None
+            resp = await self._http().get(url, params=params, headers={
+                "User-Agent": _ua(), "Accept-Language": "en-US,en;q=0.9",
+                "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+            })
+            return resp.text
+        except PortalUnavailable:
+            return None
         except Exception as e:
             log.warning("search.fetch_failed", url=url, error=str(e))
-            await self.emit("error", f"Job portal request failed: {e}", {"url": url})
+            _, portal, label = portal_for(url)
+            await self.emit("error", f"{label} request failed: {str(e) or type(e).__name__}", {"url": url, "portal": portal})
             return None

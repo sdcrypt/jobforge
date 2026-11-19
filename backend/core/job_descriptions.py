@@ -7,6 +7,7 @@ import httpx
 from core.sponsorship import update_sponsorship
 from bs4 import BeautifulSoup
 from core.description_text import plain_text
+from core.portal_http import PortalUnavailable
 
 
 def extract_description(html: str) -> str:
@@ -53,10 +54,11 @@ def extract_description(html: str) -> str:
 
 async def fetch_description(url: str) -> str:
     """Download a listing and extract its text; report HTTP errors to the caller."""
-    async with httpx.AsyncClient(timeout=15, follow_redirects=True, headers={"User-Agent": "JobForge/1.0", "Accept": "text/html"}) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-        return extract_description(response.text)
+    from core.portal_http import PortalHTTP
+    from core.runs import current_run
+    response = await PortalHTTP(persistent=current_run.get() is not None).get(
+        url, headers={"User-Agent": "JobForge/1.0", "Accept": "text/html"})
+    return extract_description(response.text)
 
 
 def replace_description(job, description: str, source: str) -> bool:
@@ -103,7 +105,7 @@ async def ensure_description(job, emit, fetcher=None) -> str:
             raise ValueError("No readable job description returned.")
         replace_description(job, description, "listing")
         job.description_error = None
-    except (httpx.HTTPError, ValueError) as error:
+    except (httpx.HTTPError, ValueError, TimeoutError, PortalUnavailable) as error:
         job.description_error = str(error)
         await emit("thinking", "Full listing description unavailable; using the stored text.", {"job_id": job.id, "description_warning": job.description_error})
     job.description_checked_at = now

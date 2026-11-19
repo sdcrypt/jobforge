@@ -70,8 +70,8 @@ async def perform_run(run) -> dict:
             raw = await agent.run(**run.payload)
             reports = getattr(agent, "portal_reports", {})
             await stage("search", f"Found {len(raw)} results", len(raw), len(raw), done=True, result={"portal_reports": reports})
-            if reports and all(report["status"] == "failed" for report in reports.values()):
-                raise RuntimeError("All configured portals failed. See portal reports for details.")
+            from core.portal_http import raise_if_all_portals_failed
+            raise_if_all_portals_failed(reports)
             from agents.pipeline import store_jobs
             await stage("store", "Saving new jobs")
             count = await store_jobs(db, raw)

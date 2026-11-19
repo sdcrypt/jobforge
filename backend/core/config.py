@@ -34,6 +34,12 @@ class Settings(BaseSettings):
     # Redis
     redis_url: str = "redis://localhost:6379/0"
 
+    # Space requests out and stop contacting a portal after an access failure.
+    portal_request_interval_seconds: float = Field(default=2, ge=0.1)
+    portal_sensitive_request_interval_seconds: float = Field(default=8, ge=1)
+    portal_rate_limit_cooldown_seconds: int = Field(default=900, ge=1)
+    portal_access_denied_cooldown_seconds: int = Field(default=3600, ge=1)
+
     # Documents
     documents_dir: str = "./documents"
 

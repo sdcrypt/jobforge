@@ -113,6 +113,7 @@ Your Mac and Docker must stay awake for processing to continue.
 - Duplicate discovery runs are prevented.
 - Completed work is saved even when a later stage fails.
 - Temporary failures retry automatically within the attempt limit.
+- Requests are paced per portal and repeated feeds are reused within each run. HTTP 429 starts a cooldown using `Retry-After` (15 minutes if absent); HTTP 403 or verification pages pause that portal for an hour. Cooldowns survive worker restarts and appear in Runs. Other portals continue.
 - The scheduler checks schedules and interrupted work every minute.
 - **Retry run** starts a linked retry while keeping the original history.
 - **Stop run** cancels the run and its research tasks, keeps saved results, and prevents retries. Scheduled future runs still follow your search configuration; set auto-run to 0 for manual runs only.
